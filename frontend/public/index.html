@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#3b82f6" />
+    <meta
+      name="description"
+      content="Enterprise-grade Complaint Resolution and Escalation System for organizations."
+    />
+
+    <!-- Google Fonts: Inter for a modern, professional look -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+
+    <title>Complaint Resolution System | Enterprise Portal</title>
+
+    <style>
+      /* Initial loader styling to show while React boots up */
+      #initial-loader {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        width: 100vw;
+        background-color: #f9fafb;
+        font-family: "Inter", sans-serif;
+      }
+      .spinner {
+        width: 40px;
+        height: 40px;
+        border: 3px solid #e5e7eb;
+        border-top: 3px solid #3b82f6;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- The React App mounts here -->
+    <div id="root">
+      <!-- Fallback loader visible until React renders -->
+      <div id="initial-loader">
+        <div class="spinner"></div>
+      </div>
+    </div>
+
+    <!-- 
+      Note: In Vite projects, the script tag is usually here.
+      If using the structure provided, Vite expects:
+      <script type="module" src="/src/main.jsx"></script>
+    -->
+  </body>
+</html>

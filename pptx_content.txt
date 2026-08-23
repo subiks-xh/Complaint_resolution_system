@@ -1,0 +1,404 @@
+
+================================================================================
+SLIDE 1
+================================================================================
+
+NATIONAL ENGINEERING COLLEGE
+K.R. Nagar, Kovilpatti - 628 503
+23CS3ME - Mini Capstone Project
+GENERIC COMPLAINT RESOLUTION AND ESCALATION SYSTEM
+
+Student:
+Subikshan M - 2212110
+
+Project Coordinator:
+Ms. R. Vazhan Arul Santhiya, AP/CSE
+
+Date: 31-01-2026
+1
+
+================================================================================
+SLIDE 2
+================================================================================
+
+PROBLEM DEFINITION & MOTIVATION
+Problem Definition
+Complaints in organizations are often handled through email, phone calls, WhatsApp messages, or manual registers.
+There is no single platform to register, route, track, and resolve complaints.
+Users cannot easily see complaint status or response history.
+Administrators lack visibility into delays, workload, and escalation handling.
+
+Motivation
+Reduce resolution delay
+Improve transparency
+Ensure accountability
+Support structured escalation
+Improve service quality
+
+Hence, a centralized complaint resolution platform is required.
+2
+
+================================================================================
+SLIDE 3
+================================================================================
+
+LITERATURE SURVEY & SYSTEM ANALYSIS
+System Design & Algorithms
+
+Srividhya & Anitha (2019) - Online grievance redressal systems
+Viswanatha & Sreedhara (2020) - Smart complaint management using web technologies
+Agarwal & Kumar (2020) - Web-based e-governance grievance framework
+Xu et al. (2020) - Machine learning based complaint classification and routing
+Al-Shargabi et al. (2020) - Sentiment analysis in complaint workflows
+Singh & Verma (2021) - Role-based access control in ticketing systems
+Zhang et al. (2021) - Deep learning for ticket assignment
+Patel & Shah (2022) - SLA enforcement and escalation evaluation
+Chen et al. (2022) - Staff assignment optimization
+Gupta & Singh (2023) - Complaint tracking architecture review
+3
+
+================================================================================
+SLIDE 4
+================================================================================
+
+LITERATURE SURVEY & SYSTEM ANALYSIS
+Patents & Advanced Workflow
+
+Lee & Kim (2023) - Workflow-oriented service request systems
+Brown & Green (2023) - Hybrid automation approaches
+
+Patents and Industry Systems
+Johnson et al. (2019) - Automated case assignment
+Salesforce (2020) - Adaptive routing
+IBM (2020) - Dynamic prioritization
+Microsoft (2021) - Automated triage
+ServiceNow (2021) - Predictive assignment
+Zendesk (2022) - Intelligent routing
+Oracle (2022) - SLA monitoring
+Sharma (2024) - Smart grievance handling framework
+4
+
+================================================================================
+SLIDE 5
+================================================================================
+
+PROPOSED SOLUTION
+We propose a Generic Complaint Resolution and Escalation System that supports:
+Any organization such as college, office, apartment, or institution
+Multiple roles such as Admin, Staff, and User
+Secure authentication and role-based access control
+Category-based complaint routing
+SLA monitoring and deadline tracking
+Automatic escalation for delayed complaints
+Email and dashboard notifications
+Real-time admin and staff dashboards
+Integrated payment workflow for priority services
+Receipt generation and payment tracking
+
+Technology Used
+MERN Stack: MongoDB, Express.js, React.js, Node.js
+Supporting services: JWT, Node-cron, Cloudinary, Nodemailer, Swagger, Docker
+5
+
+================================================================================
+SLIDE 6
+================================================================================
+
+CONCEPTUAL ARCHITECTURE DIAGRAM
+Explanation
+User submits complaint through the React frontend
+Node.js backend validates input and processes the request
+MongoDB stores complaints, users, logs, and escalation rules
+Rule engine selects the right staff member based on category and workload
+Node-cron monitors SLA deadlines in the background
+Escalation alerts are triggered automatically for overdue cases
+Payment module supports complaint-linked transactions and receipts
+Staff update complaint status through their dashboard
+Admins monitor the complete workflow through analytics
+6
+
+================================================================================
+SLIDE 7
+================================================================================
+
+SYSTEM WORKFLOW
+Workflow Steps
+User logs in and raises a complaint
+API validates the request and stores the complaint
+Rule engine assigns the complaint to staff
+SLA scheduler tracks resolution time
+If delayed, escalation is triggered automatically
+Admin monitors complaint progress through the dashboard
+Staff updates status until resolution is completed
+7
+
+================================================================================
+SLIDE 8
+================================================================================
+
+DATABASE / MODEL DESIGN
+MongoDB Collections
+Users: role, department, skills, contact info, authentication data
+Complaints: title, description, category, priority, status, attachments, timestamps
+Categories: complaint types and SLA rules
+AssignmentLogs: assignment decisions and audit history
+EscalationRules: deadline thresholds and escalation levels
+Notifications: email and in-app alert records
+Payments: transaction status, method, amount, receipt metadata
+Organizations: multi-organization tenant information
+StaffFeedback: service quality ratings and comments
+
+Key Design Features
+Flexible schema for changing requirements
+Complete audit trail for accountability
+Easy mapping between complaints, users, and logs
+Supports attachments and status history
+Supports payment and feedback insights for governance
+8
+
+================================================================================
+SLIDE 9
+================================================================================
+
+ALGORITHM JUSTIFICATION
+Rule-Based Assignment Algorithm
+
+Why this approach
+Transparent decision making
+Easy to maintain and update
+Suitable for real-time workflows
+Simple to debug and explain
+
+Compared to ML-based routing, a rule-based approach is preferred here because complaint handling must be predictable, auditable, and easy for administrators to verify.
+9
+
+================================================================================
+SLIDE 10
+================================================================================
+
+MODEL PROTOTYPE
+The updated prototype is a functional MERN stack web application that demonstrates the complete complaint lifecycle from submission to resolution and escalation.
+
+Core features
+JWT-based authentication with secure role-based access control
+Complaint submission with validation and attachments
+Rule-based complaint assignment
+SLA tracking using a background scheduler
+Automated escalation notifications
+Admin analytics and staff workflow dashboards
+Payment center with initiate, confirm, refund, and receipt lookup
+Template library, notification center, and reporting module
+Organization and system-user management for admin roles
+
+This prototype proves the feasibility of the updated system in a real organizational setting.
+10
+
+================================================================================
+SLIDE 11
+================================================================================
+
+HOME PAGE
+Add screenshot of the landing page or login page here.
+11
+
+================================================================================
+SLIDE 12
+================================================================================
+
+USER DASHBOARD
+Add screenshot of the user dashboard here.
+12
+
+================================================================================
+SLIDE 13
+================================================================================
+
+COMPLAINT SUBMISSION SCREEN
+Add screenshot of the complaint creation form here.
+13
+
+================================================================================
+SLIDE 14
+================================================================================
+
+ADMIN DASHBOARD
+Add screenshot of the admin dashboard here.
+14
+
+================================================================================
+SLIDE 15
+================================================================================
+
+IMPLEMENTATION PROGRESS - AUTHENTICATION
+Completed
+Secure JWT login for Admin, Staff, and User
+Role-based route protection
+Password hashing and session handling
+Forgot password and reset password workflow
+15
+
+================================================================================
+SLIDE 16
+================================================================================
+
+IMPLEMENTATION PROGRESS - USER FLOW
+Completed
+User registration and login
+Complaint submission form
+Input validation and sanitization
+File attachment support
+Complaint details and feedback submission flow
+16
+
+================================================================================
+SLIDE 17
+================================================================================
+
+IMPLEMENTATION PROGRESS - COMPLAINT MANAGEMENT
+Completed
+Complaint listing and filtering
+Status updates and history tracking
+Category and priority handling
+Assignment logs for auditability
+Staff complaint workspace with advanced actions
+17
+
+================================================================================
+SLIDE 18
+================================================================================
+
+IMPLEMENTATION PROGRESS - STAFF PANEL
+Completed
+Staff complaint inbox
+Update status workflow
+Resolution comments and progress tracking
+Pending and overdue case visibility
+Work timer controls and productivity tracking
+18
+
+================================================================================
+SLIDE 19
+================================================================================
+
+IMPLEMENTATION PROGRESS - ASSIGNMENT ENGINE
+Completed
+Category-based staff assignment
+Workload-aware routing logic
+Rule-driven decision tracing
+Assignment history recording
+Escalation-aware handling logic
+19
+
+================================================================================
+SLIDE 20
+================================================================================
+
+IMPLEMENTATION PROGRESS - SLA AND ESCALATION
+Completed
+Category-wise SLA deadlines
+Cron-based deadline monitoring
+Automatic escalation triggers
+Escalation notification flow
+Priority breach alert support
+20
+
+================================================================================
+SLIDE 21
+================================================================================
+
+IMPLEMENTATION PROGRESS - NOTIFICATIONS
+Completed
+Email alerts for assignment and escalation
+In-app status updates
+Notification records in database
+Timely communication to users and staff
+Admin notification center with filters and mark-as-read
+21
+
+================================================================================
+SLIDE 22
+================================================================================
+
+IMPLEMENTATION PROGRESS - ADMIN ANALYTICS
+Completed
+Dashboard charts for complaint status
+Category-wise complaint trends
+Staff workload overview
+Resolution performance visibility
+Feedback analytics and staff ranking insights
+22
+
+================================================================================
+SLIDE 23
+================================================================================
+
+IMPLEMENTATION PROGRESS - FILE HANDLING
+Completed
+Complaint attachment upload support
+Cloudinary-based media storage
+Secure file handling through backend middleware
+Attachment visibility in complaint details
+Reusable upload components in frontend
+23
+
+================================================================================
+SLIDE 24
+================================================================================
+
+IMPLEMENTATION PROGRESS - SECURITY
+Completed
+Helmet, rate limiting, and CORS controls
+CSRF and sanitization middleware
+Input validation for requests
+Protected APIs and admin routes
+Token refresh flow and guarded role-based routes
+24
+
+================================================================================
+SLIDE 25
+================================================================================
+
+IMPLEMENTATION PROGRESS - API AND DOCUMENTATION
+Completed
+RESTful backend APIs
+Swagger API documentation
+Structured controller and route architecture
+Reusable service and middleware layers
+Dedicated APIs for payments, templates, and reporting
+25
+
+================================================================================
+SLIDE 26
+================================================================================
+
+IMPLEMENTATION PROGRESS - TESTING
+Completed
+Backend Jest test suites
+Integration and middleware validation
+Regression checks for complaint workflow
+Stable build verification
+Frontend validator tests with Vitest
+26
+
+================================================================================
+SLIDE 27
+================================================================================
+
+IMPLEMENTATION PROGRESS - DEPLOYMENT
+Completed
+Dockerized backend and frontend setup
+Production build support
+MongoDB integration through environment config
+Single-command deployment workflow
+Production static frontend serving via backend
+27
+
+================================================================================
+SLIDE 28
+================================================================================
+
+CONCLUSION
+The updated project delivers a reusable, secure, and scalable complaint resolution platform for real-world organizations.
+It combines role-based access, automated assignment, SLA monitoring, escalation, payments, notifications, templates, analytics, and reporting in one full-stack system.
+The implementation meets the mini capstone objectives and is ready for demonstration and further enhancement.
+28
