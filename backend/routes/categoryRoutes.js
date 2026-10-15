@@ -56,7 +56,7 @@ router.get("/", optionalAuth, getAllCategories);
  * @desc    Get categories in tree structure
  * @access  Public
  */
-router.get("/tree", getCategoryTree);
+router.get("/tree", optionalAuth, getCategoryTree);
 
 /**
  * @route   POST /api/categories/suggest

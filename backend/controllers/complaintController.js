@@ -11,7 +11,9 @@
 const Complaint = require("../models/Complaint");
 const Category = require("../models/Category");
 const User = require("../models/User");
+const Organization = require("../models/Organization");
 const Notification = require("../models/Notification");
+const notificationService = require("../services/notificationService");
 const {
   deleteFromCloudinary,
   deleteMultipleFromCloudinary,
@@ -51,12 +53,32 @@ const createComplaint = async (req, res) => {
       });
     }
 
-    // Validate category exists
-    const categoryDoc = await Category.findById(category);
-    if (!categoryDoc) {
+    // Verify user belongs to an organization
+    if (!req.user.organization) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Your account is not associated with any organization. Cannot submit complaint.",
+      });
+    }
+
+    // Validate category exists and belongs to the user's organization
+    if (!mongoose.Types.ObjectId.isValid(category)) {
       return res.status(400).json({
         success: false,
         message: "Invalid category selected",
+      });
+    }
+
+    const categoryDoc = await Category.findOne({
+      _id: category,
+      organization: req.user.organization,
+    });
+
+    if (!categoryDoc) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid category selected for this organization",
       });
     }
 
@@ -140,14 +162,6 @@ const createComplaint = async (req, res) => {
       }
     }
 
-    // Verify user belongs to an organization
-    if (!req.user.organization) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Your account is not associated with any organization. Cannot submit complaint.",
-      });
-    }
 
     // Create complaint
     const complaint = await Complaint.create({
@@ -179,7 +193,7 @@ const createComplaint = async (req, res) => {
     // Send notifications (non-blocking)
     try {
       // Send notification to user
-      await Notification.createFromTemplate({
+      await notificationService.sendInAppFromTemplate({
         type: "complaint_submitted",
         recipient: req.user.id,
         complaint: complaint._id,
@@ -227,7 +241,17 @@ const createComplaint = async (req, res) => {
       }));
 
       if (adminNotifications.length > 0) {
-        await Notification.insertMany(adminNotifications);
+        const allowedRecipients = await notificationService.filterRecipientsForInApp(
+          recipients.map((r) => r._id),
+          "complaint_submitted",
+        );
+        const allowedSet = new Set(allowedRecipients.map((id) => id.toString()));
+        const filteredNotifications = adminNotifications.filter((n) =>
+          allowedSet.has(n.recipient.toString()),
+        );
+        if (filteredNotifications.length > 0) {
+          await Notification.insertMany(filteredNotifications);
+        }
       }
     } catch (notifError) {
       console.error("Notification Error:", notifError);
@@ -435,18 +459,29 @@ const getComplaintById = async (req, res) => {
     const { id } = req.params;
 
     // Find by _id or complaintId
+    let baseQuery = {};
+    if (req.user.role !== "super_admin") {
+      if (!req.user.organization) {
+        return res.status(403).json({
+          success: false,
+          message: "User is not associated with an organization",
+        });
+      }
+      baseQuery.organization = req.user.organization;
+    }
+
     let complaint;
     if (mongoose.Types.ObjectId.isValid(id)) {
       complaint = await Complaint.findOne({
         _id: id,
-        organization: req.user.organization,
+        ...baseQuery,
       });
     }
 
     if (!complaint) {
       complaint = await Complaint.findOne({
         complaintId: id.toUpperCase(),
-        organization: req.user.organization,
+        ...baseQuery,
       });
     }
 
@@ -460,10 +495,10 @@ const getComplaintById = async (req, res) => {
     // Check authorization
     const isOwner = complaint.user.toString() === req.user.id;
     const isAssignee = complaint.assignedTo?.toString() === req.user.id;
-    const isAdmin = req.user.role === "admin";
+    const isOrgAdminOrSuper = ["org_admin", "super_admin", "admin"].includes(req.user.role);
     const isStaff = req.user.role === "staff";
 
-    if (!isOwner && !isAssignee && !isAdmin && !isStaff) {
+    if (!isOwner && !isAssignee && !isOrgAdminOrSuper && !isStaff) {
       return res.status(403).json({
         success: false,
         message: "Not authorized to view this complaint",
@@ -732,10 +767,18 @@ const addAttachment = async (req, res) => {
       });
     }
 
-    const complaint = await Complaint.findOne({
-      _id: id,
-      organization: req.user.organization,
-    });
+    let complaintQuery = { _id: id };
+    if (req.user.role !== "super_admin") {
+      if (!req.user.organization) {
+        return res.status(403).json({
+          success: false,
+          message: "User is not associated with an organization",
+        });
+      }
+      complaintQuery.organization = req.user.organization;
+    }
+
+    const complaint = await Complaint.findOne(complaintQuery);
 
     if (!complaint) {
       // Clean up uploaded files
@@ -757,7 +800,7 @@ const addAttachment = async (req, res) => {
     // Check authorization
     const isOwner = complaint.user.toString() === req.user.id;
     const isAssignee = complaint.assignedTo?.toString() === req.user.id;
-    const isAdmin = req.user.role === "admin";
+    const isAdmin = ["org_admin", "super_admin", "admin"].includes(req.user.role);
 
     if (!isOwner && !isAssignee && !isAdmin) {
       // Clean up uploaded files
@@ -858,10 +901,18 @@ const deleteAttachment = async (req, res) => {
   try {
     const { id, attachmentId } = req.params;
 
-    const complaint = await Complaint.findOne({
-      _id: id,
-      organization: req.user.organization,
-    });
+    let complaintQuery = { _id: id };
+    if (req.user.role !== "super_admin") {
+      if (!req.user.organization) {
+        return res.status(403).json({
+          success: false,
+          message: "User is not associated with an organization",
+        });
+      }
+      complaintQuery.organization = req.user.organization;
+    }
+
+    const complaint = await Complaint.findOne(complaintQuery);
 
     if (!complaint) {
       return res.status(404).json({
@@ -872,7 +923,7 @@ const deleteAttachment = async (req, res) => {
 
     // Check authorization
     const isOwner = complaint.user.toString() === req.user.id;
-    const isAdmin = req.user.role === "admin";
+    const isAdmin = ["org_admin", "super_admin", "admin"].includes(req.user.role);
 
     if (!isOwner && !isAdmin) {
       return res.status(403).json({
@@ -1008,7 +1059,7 @@ const cancelComplaint = async (req, res) => {
 
     // Notify assignee if any
     if (previousAssignee) {
-      await Notification.create({
+      await notificationService.sendInAppNotification({
         recipient: previousAssignee,
         type: "complaint_closed",
         title: "Complaint Withdrawn",
@@ -1026,7 +1077,7 @@ const cancelComplaint = async (req, res) => {
       organization: req.user.organization, // Filter by Org
     }).select("_id");
     for (const admin of admins) {
-      await Notification.create({
+      await notificationService.sendInAppNotification({
         recipient: admin._id,
         type: "complaint_closed",
         title: "Complaint Withdrawn",
@@ -1071,7 +1122,17 @@ const reopenComplaint = async (req, res) => {
       });
     }
 
-    const complaint = await Complaint.findById(id);
+    if (!req.user.organization) {
+      return res.status(403).json({
+        success: false,
+        message: "User is not associated with an organization",
+      });
+    }
+
+    const complaint = await Complaint.findOne({
+      _id: id,
+      organization: req.user.organization,
+    });
 
     if (!complaint) {
       return res.status(404).json({
@@ -1162,16 +1223,18 @@ const reopenComplaint = async (req, res) => {
       notifyUsers.add(complaint.assignedTo.toString());
     }
 
-    // Notify admins
+    // Notify admins (org_admin within the same organization, and super_admin)
     const admins = await User.find({
-      role: { $in: ["admin", "org_admin", "super_admin"] },
-      isActive: true,
+      $or: [
+        { role: "super_admin", isActive: true },
+        { role: { $in: ["admin", "org_admin"] }, organization: req.user.organization, isActive: true },
+      ],
     }).select("_id");
     admins.forEach((admin) => notifyUsers.add(admin._id.toString()));
 
     // Send notifications
     for (const userId of notifyUsers) {
-      await Notification.create({
+      await notificationService.sendInAppNotification({
         recipient: userId,
         type: "complaint_reopened",
         title: "Complaint Reopened",
@@ -1409,7 +1472,7 @@ const getMyComplaintStats = async (req, res) => {
  */
 const searchComplaints = async (req, res) => {
   try {
-    const { q, limit = 10 } = req.query;
+    const { q, limit = 10, organization } = req.query;
 
     if (!q || q.trim().length < 2) {
       return res.status(400).json({
@@ -1421,28 +1484,71 @@ const searchComplaints = async (req, res) => {
     // Build base query based on user role
     let baseQuery = { isArchived: false };
 
-    if (req.user.role === "user") {
-      baseQuery.user = req.user.id;
-    } else if (req.user.role === "staff") {
-      baseQuery.$or = [{ assignedTo: req.user.id }, { user: req.user.id }];
-    }
-    // Admin can search all
+    if (req.user.role === "super_admin") {
+      // Super Admin can search globally, or optionally filter by valid organization
+      if (organization) {
+        if (!mongoose.Types.ObjectId.isValid(organization)) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid organization ID",
+          });
+        }
+        const orgExists = await Organization.findById(organization);
+        if (!orgExists) {
+          return res.status(404).json({
+            success: false,
+            message: "Target organization not found",
+          });
+        }
+        baseQuery.organization = organization;
+      }
+    } else {
+      // All other roles are strictly tenant-scoped to their own organization
+      if (!req.user.organization) {
+        return res.status(403).json({
+          success: false,
+          message: "User is not associated with an organization",
+        });
+      }
+      baseQuery.organization = req.user.organization;
 
-    const complaints = await Complaint.find({
+      if (req.user.role === "user") {
+        baseQuery.user = req.user.id;
+      } else if (req.user.role === "staff") {
+        baseQuery.$or = [{ assignedTo: req.user.id }, { user: req.user.id }];
+      } else if (req.user.role === "org_admin" || req.user.role === "admin") {
+        // org_admin scoped to their organization
+      } else {
+        return res.status(403).json({
+          success: false,
+          message: "Not authorized to search complaints",
+        });
+      }
+    }
+
+    const searchQuery = {
       ...baseQuery,
       $text: { $search: q },
-    })
-      .select("complaintId title status priority category createdAt")
-      .populate("category", "name color")
-      .sort({ score: { $meta: "textScore" } })
-      .limit(parseInt(limit))
-      .lean();
+    };
+
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 10));
+
+    const [complaints, totalMatching] = await Promise.all([
+      Complaint.find(searchQuery)
+        .select("complaintId title status priority category organization createdAt")
+        .populate("category", "name color")
+        .sort({ score: { $meta: "textScore" } })
+        .limit(limitNum)
+        .lean(),
+      Complaint.countDocuments(searchQuery),
+    ]);
 
     res.status(200).json({
       success: true,
       data: {
         query: q,
         count: complaints.length,
+        total: totalMatching,
         complaints,
       },
     });
@@ -1465,9 +1571,20 @@ const getComplaintTimeline = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const complaint = await Complaint.findById(id)
+    let complaintQuery = { _id: id };
+    if (req.user.role !== "super_admin") {
+      if (!req.user.organization) {
+        return res.status(403).json({
+          success: false,
+          message: "User is not associated with an organization",
+        });
+      }
+      complaintQuery.organization = req.user.organization;
+    }
+
+    const complaint = await Complaint.findOne(complaintQuery)
       .select(
-        "complaintId title statusHistory escalationHistory timeline user assignedTo",
+        "complaintId title statusHistory escalationHistory timeline user assignedTo organization",
       )
       .populate("statusHistory.changedBy", "name role avatar")
       .populate("escalationHistory.escalatedBy", "name")
@@ -1481,12 +1598,16 @@ const getComplaintTimeline = async (req, res) => {
       });
     }
 
-    // Check authorization
+    // Check role-based authorization within the authorized organization
     const isOwner = complaint.user.toString() === req.user.id;
     const isAssignee = complaint.assignedTo?.toString() === req.user.id;
-    const isAdminOrStaff = ["admin", "staff"].includes(req.user.role);
+    const isOrgAdminOrSuper = ["org_admin", "super_admin", "admin"].includes(req.user.role);
+    const isStaff = req.user.role === "staff";
 
-    if (!isOwner && !isAssignee && !isAdminOrStaff) {
+    // Regular users can only view their own complaint timeline
+    // Staff can view if assigned (or if staff in same org - allow isAssignee or same org staff)
+    // Org Admin can view any complaint in their org; Super Admin globally
+    if (!isOwner && !isAssignee && !isOrgAdminOrSuper && !isStaff) {
       return res.status(403).json({
         success: false,
         message: "Not authorized to view this complaint timeline",

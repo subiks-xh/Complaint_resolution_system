@@ -66,7 +66,10 @@ const statusHistorySchema = new mongoose.Schema(
     changedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      required: function () {
+        return this.changedByRole !== "system";
+      },
+      default: null,
     },
     changedByRole: {
       type: String,
@@ -544,8 +547,10 @@ complaintSchema.pre("save", async function (next) {
     this.complaintId = `CMP-${year}-${String(sequence).padStart(5, "0")}`;
   }
 
-  // Update lastUpdatedAt
-  this.timeline.lastUpdatedAt = new Date();
+  // Update lastUpdatedAt only if not explicitly set or modified
+  if (!this.timeline.lastUpdatedAt || !this.isNew) {
+    this.timeline.lastUpdatedAt = new Date();
+  }
 
   next();
 });

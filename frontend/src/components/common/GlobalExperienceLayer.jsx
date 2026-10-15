@@ -101,13 +101,40 @@ const commandGroups = {
     { label: "Support Center", path: "/support" },
     { label: "Profile Settings", path: "/profile" },
   ],
+  org_admin: [
+    { label: "Admin Dashboard", path: "/admin/dashboard" },
+    { label: "Manage Complaints", path: "/admin/complaints" },
+    { label: "Manage Staff", path: "/admin/staff" },
+    { label: "Categories", path: "/admin/categories" },
+    { label: "Analytics", path: "/admin/analytics" },
+    { label: "Escalation Rules", path: "/admin/escalation-rules" },
+    { label: "Assignment Config", path: "/admin/assignment-config" },
+    { label: "Templates", path: "/admin/templates" },
+    { label: "Payments", path: "/payments/my-payments" },
+    { label: "Audit Logs", path: "/admin/audit-log" },
+    { label: "Support Center", path: "/support" },
+  ],
+  super_admin: [
+    { label: "Platform Overview", path: "/admin/dashboard" },
+    { label: "Manage Complaints", path: "/admin/complaints" },
+    { label: "Manage Staff", path: "/admin/staff" },
+    { label: "All Organizations", path: "/admin/organizations" },
+    { label: "System Users", path: "/admin/users" },
+    { label: "Categories", path: "/admin/categories" },
+    { label: "Analytics", path: "/admin/analytics" },
+    { label: "Escalation Rules", path: "/admin/escalation-rules" },
+    { label: "Assignment Config", path: "/admin/assignment-config" },
+    { label: "Templates", path: "/admin/templates" },
+    { label: "Payments", path: "/payments/my-payments" },
+    { label: "Audit Logs", path: "/admin/audit-log" },
+    { label: "Support Center", path: "/support" },
+  ],
   admin: [
     { label: "Admin Dashboard", path: "/admin/dashboard" },
     { label: "Manage Complaints", path: "/admin/complaints" },
     { label: "Manage Staff", path: "/admin/staff" },
     { label: "Analytics", path: "/admin/analytics" },
     { label: "Escalation Rules", path: "/admin/escalation-rules" },
-    { label: "Reports", path: "/admin/reports" },
     { label: "Support Center", path: "/support" },
   ],
 };
@@ -191,6 +218,8 @@ const GlobalExperienceLayer = () => {
     if (!user?.role) return commandGroups.guest;
     if (user.role === "user") return commandGroups.user;
     if (user.role === "staff") return commandGroups.staff;
+    if (user.role === "super_admin") return commandGroups.super_admin;
+    if (user.role === "org_admin") return commandGroups.org_admin;
     return commandGroups.admin;
   }, [user]);
 

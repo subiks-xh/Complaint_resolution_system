@@ -13,6 +13,7 @@ const Complaint = require("../models/Complaint");
 const Feedback = require("../models/Feedback");
 const StaffFeedback = require("../models/StaffFeedback");
 const Notification = require("../models/Notification");
+const notificationService = require("../services/notificationService");
 const { deleteFromCloudinary } = require("../config/cloudinary");
 const mongoose = require("mongoose");
 
@@ -471,6 +472,42 @@ const deleteNotification = async (req, res) => {
 };
 
 /**
+ * @desc    Get notification preferences
+ * @route   GET /api/users/notification-preferences
+ * @access  Private
+ */
+const getNotificationPreferences = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select("notificationPreferences");
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const preferences = user.notificationPreferences || {
+      email: true,
+      inApp: true,
+      complaintUpdates: true,
+      escalationAlerts: true,
+    };
+
+    res.status(200).json({
+      success: true,
+      data: preferences,
+    });
+  } catch (error) {
+    console.error("Get notification preferences error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error retrieving preferences",
+    });
+  }
+};
+
+/**
  * @desc    Update notification preferences
  * @route   PUT /api/users/notification-preferences
  * @access  Private
@@ -488,13 +525,22 @@ const updateNotificationPreferences = async (req, res) => {
       });
     }
 
+    if (!user.notificationPreferences) {
+      user.notificationPreferences = {
+        email: true,
+        inApp: true,
+        complaintUpdates: true,
+        escalationAlerts: true,
+      };
+    }
+
     // Update preferences
-    if (email !== undefined) user.notificationPreferences.email = email;
-    if (inApp !== undefined) user.notificationPreferences.inApp = inApp;
+    if (email !== undefined) user.notificationPreferences.email = Boolean(email);
+    if (inApp !== undefined) user.notificationPreferences.inApp = Boolean(inApp);
     if (complaintUpdates !== undefined)
-      user.notificationPreferences.complaintUpdates = complaintUpdates;
+      user.notificationPreferences.complaintUpdates = Boolean(complaintUpdates);
     if (escalationAlerts !== undefined)
-      user.notificationPreferences.escalationAlerts = escalationAlerts;
+      user.notificationPreferences.escalationAlerts = Boolean(escalationAlerts);
 
     await user.save();
 
@@ -954,7 +1000,7 @@ const addStaffFeedback = async (req, res) => {
 
     // Create notification for staff member (optional)
     try {
-      await Notification.create({
+      await notificationService.sendInAppNotification({
         recipient: staffId,
         type: "feedback_received",
         title: "New Feedback Received",
@@ -994,6 +1040,7 @@ module.exports = {
   markNotificationRead,
   markAllNotificationsRead,
   deleteNotification,
+  getNotificationPreferences,
   updateNotificationPreferences,
   getUserById,
   getAllUsers,

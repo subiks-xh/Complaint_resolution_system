@@ -236,6 +236,7 @@ const Navbar = () => {
         href: "/admin/organizations",
         icon: Building,
       }, // We'll need to create this or just let them see stats
+      { name: "Manage Staff", href: "/admin/staff", icon: User },
       { name: "System Users", href: "/admin/users", icon: Users },
       { name: "Payments", href: "/payments/my-payments", icon: CreditCard },
       { name: "Templates", href: "/admin/templates", icon: FileText },

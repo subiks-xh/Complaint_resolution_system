@@ -196,6 +196,8 @@ const markAllNotificationsRead = async (req, res) => {
   }
 };
 
+const notificationService = require("../services/notificationService");
+
 /**
  * @desc    Create a new notification
  * @route   POST /api/notifications
@@ -210,7 +212,7 @@ const createNotification = async ({
   organization = null,
 }) => {
   try {
-    const notification = await Notification.create({
+    return await notificationService.sendInAppNotification({
       recipient,
       sender,
       type,
@@ -218,8 +220,6 @@ const createNotification = async ({
       metadata,
       organization,
     });
-
-    return notification;
   } catch (err) {
     console.error("Create notification error:", err);
     throw err;
@@ -233,7 +233,28 @@ const createNotification = async ({
  */
 const createBulkNotifications = async (notifications) => {
   try {
-    const result = await Notification.insertMany(notifications);
+    // If empty array, return immediately
+    if (!Array.isArray(notifications) || notifications.length === 0) {
+      return [];
+    }
+
+    const recipientIds = notifications.map((n) => n.recipient);
+    const sampleType = notifications[0]?.type || "system_announcement";
+    const allowedRecipients = await notificationService.filterRecipientsForInApp(
+      recipientIds,
+      sampleType,
+    );
+
+    const allowedSet = new Set(allowedRecipients.map((id) => id.toString()));
+    const filteredNotifications = notifications.filter((n) =>
+      allowedSet.has(n.recipient.toString()),
+    );
+
+    if (filteredNotifications.length === 0) {
+      return [];
+    }
+
+    const result = await Notification.insertMany(filteredNotifications);
     return result;
   } catch (err) {
     console.error("Create bulk notifications error:", err);

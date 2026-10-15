@@ -72,157 +72,23 @@ const getAdminRecipients = async (organizationId) => {
   }).select("_id name email");
 };
 
+const { runEscalationCycle } = require("./escalationEngine");
+
 /**
  * Check and Escalate Overdue Complaints
  *
- * Main escalation logic - runs periodically to check for SLA breaches
+ * Main escalation logic - evaluates configured EscalationRule definitions
+ * and detects SLA deadline breaches across all active complaints.
  */
-const checkAndEscalateComplaints = async () => {
-  console.log("🔄 Running escalation check...");
+const checkAndEscalateComplaints = async (options = {}) => {
+  console.log("🔄 Running unified escalation engine check...");
 
   try {
-    const now = new Date();
-
-    // Find complaints that have breached SLA
-    const overdueComplaints = await Complaint.find({
-      status: { $nin: ["resolved", "closed", "escalated"] },
-      resolutionDeadline: { $lt: now },
-      slaBreached: { $ne: true },
-    })
-      .populate("user", "name email")
-      .populate("assignedTo", "name email")
-      .populate("category", "name escalationConfig");
-
-    console.log(`📋 Found ${overdueComplaints.length} overdue complaints`);
-
-    let escalatedCount = 0;
-    let notificationsSent = 0;
-
-    for (const complaint of overdueComplaints) {
-      try {
-        // Mark SLA as breached
-        complaint.slaBreached = true;
-
-        // Check if auto-escalation is enabled for this category
-        const autoEscalate =
-          complaint.category?.escalationConfig?.autoEscalate !== false;
-
-        if (
-          autoEscalate &&
-          complaint.escalationLevel < config.maxEscalationLevel
-        ) {
-          // Escalate the complaint
-          complaint.escalationLevel += 1;
-          complaint.status = "escalated";
-          complaint.timeline.escalatedAt = now;
-          complaint.timeline.lastUpdatedAt = now;
-
-          // Add escalation history
-          complaint.escalationHistory.push({
-            escalatedAt: now,
-            escalationLevel: complaint.escalationLevel,
-            reason: "SLA breach - automatic escalation",
-            escalationType: "auto",
-            previousAssignee: complaint.assignedTo?._id,
-          });
-
-          // Add status history
-          complaint.statusHistory.push({
-            status: "escalated",
-            changedBy: null, // System
-            changedByRole: "system",
-            remarks: `Auto-escalated due to SLA breach. Level: ${complaint.escalationLevel}`,
-            changedAt: now,
-          });
-
-          escalatedCount++;
-        }
-
-        await complaint.save();
-
-        // Send notifications
-        const notificationPromises = [];
-
-        // Notify organization admins and super admins
-        const admins = await getAdminRecipients(complaint.organization);
-
-        for (const admin of admins) {
-          // In-app notification
-          notificationPromises.push(
-            Notification.create({
-              recipient: admin._id,
-              type: "sla_breach",
-              title: "SLA Breach Alert",
-              message: `Complaint "${complaint.complaintId}" has breached its SLA deadline and has been ${autoEscalate ? "escalated" : "flagged"}.`,
-              priority: "urgent",
-              relatedComplaint: complaint._id,
-              actionUrl: `/admin/complaints/${complaint._id}`,
-              metadata: {
-                complaintId: complaint.complaintId,
-                escalationLevel: complaint.escalationLevel,
-                breachTime: now,
-              },
-            }),
-          );
-
-          // Email notification
-          notificationPromises.push(
-            sendEscalationAlertEmail(
-              admin,
-              complaint,
-              "SLA breach - automatic escalation",
-              complaint.escalationLevel,
-            ),
-          );
-        }
-
-        // Notify assigned staff if exists
-        if (complaint.assignedTo) {
-          notificationPromises.push(
-            Notification.create({
-              recipient: complaint.assignedTo._id,
-              type: "complaint_escalated",
-              title: "Complaint Escalated",
-              message: `Complaint "${complaint.complaintId}" has been escalated due to SLA breach.`,
-              priority: "urgent",
-              relatedComplaint: complaint._id,
-              actionUrl: `/staff/complaints/${complaint._id}`,
-            }),
-          );
-        }
-
-        // Notify the user
-        notificationPromises.push(
-          Notification.create({
-            recipient: complaint.user._id,
-            type: "complaint_escalated",
-            title: "Complaint Escalated",
-            message: `Your complaint "${complaint.complaintId}" has been escalated for priority handling.`,
-            priority: "high",
-            relatedComplaint: complaint._id,
-            actionUrl: `/complaints/${complaint._id}`,
-          }),
-        );
-
-        await Promise.allSettled(notificationPromises);
-        notificationsSent += notificationPromises.length;
-      } catch (error) {
-        console.error(
-          `Error processing complaint ${complaint.complaintId}:`,
-          error,
-        );
-      }
-    }
-
+    const results = await runEscalationCycle(options);
     console.log(
-      `✅ Escalation check complete. Escalated: ${escalatedCount}, Notifications: ${notificationsSent}`,
+      `✅ Escalation cycle complete. Processed: ${results.processedCount}, Escalated: ${results.escalatedCount}, Rules Evaluated: ${results.rulesEvaluated}`,
     );
-
-    return {
-      checked: overdueComplaints.length,
-      escalated: escalatedCount,
-      notifications: notificationsSent,
-    };
+    return results;
   } catch (error) {
     console.error("❌ Error in escalation check:", error);
     throw error;

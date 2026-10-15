@@ -20,6 +20,11 @@ const authService = {
 
   updateProfile: (data) => api.put("/users/profile", data),
 
+  getNotificationPreferences: () => api.get("/users/notification-preferences"),
+
+  updateNotificationPreferences: (prefs) =>
+    api.put("/users/notification-preferences", prefs),
+
   updateAvatar: (formData) =>
     api.put("/users/profile/avatar", formData, {
       headers: { "Content-Type": "multipart/form-data" },

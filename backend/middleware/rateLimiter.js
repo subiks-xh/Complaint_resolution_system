@@ -35,7 +35,7 @@ const loginLimiter = rateLimit({
   legacyHeaders: false,
   skipSuccessfulRequests: true, // Don't count successful requests
   skipFailedRequests: false, // Count failed requests
-  key: (req, res) => req.body?.email || req.ip, // Rate limit by email orIP
+  keyGenerator: (req) => req.body?.email || req.ip, // Rate limit by email or IP
   skip: () => isNonProduction,
 });
 
@@ -49,7 +49,7 @@ const passwordResetLimiter = rateLimit({
   message: "Too many password reset requests, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
-  key: (req, res) => req.body?.email || req.ip,
+  keyGenerator: (req) => req.body?.email || req.ip,
   skip: () => isNonProduction,
 });
 
@@ -60,7 +60,7 @@ const uploadLimiter = rateLimit({
   message: "Too many file uploads, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
-  key: (req, res) => req.user?.id || req.ip, // Use user ID if authenticated
+  keyGenerator: (req) => req.user?.id || req.ip, // Use user ID if authenticated
   skip: (req) => isNonProduction || !req.user,
 });
 

@@ -24,15 +24,31 @@ const SupportChatbot = () => {
     setLoading(true);
 
     try {
-      const { data } = await api.post("/chatbot/message", { message: text });
+      // Pass recent messages for context
+      const historyPayload = messages.slice(-4).map((m) => ({
+        role: m.role,
+        text: m.text,
+      }));
+      const { data } = await api.post("/chatbot/message", { message: text, history: historyPayload });
       const reply = data?.data?.reply || "I could not process that just now.";
-      setMessages((prev) => [...prev, { role: "bot", text: reply }]);
-    } catch (error) {
+      const providerNotice = data?.data?.providerNotice;
       setMessages((prev) => [
         ...prev,
         {
           role: "bot",
-          text: "Chatbot is currently unavailable. Please try again in a moment.",
+          text: reply,
+          notice: providerNotice,
+        },
+      ]);
+    } catch (error) {
+      const errMsg =
+        error.response?.data?.message ||
+        "Chatbot is currently unavailable. Please try again in a moment.";
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "bot",
+          text: errMsg,
         },
       ]);
     } finally {
@@ -73,6 +89,11 @@ const SupportChatbot = () => {
                 }`}
               >
                 {message.text}
+                {message.notice && (
+                  <div className="mt-1 text-[11px] opacity-75 italic">
+                    {message.notice}
+                  </div>
+                )}
               </div>
             ))}
             {loading && (

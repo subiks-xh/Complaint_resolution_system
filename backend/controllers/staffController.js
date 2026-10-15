@@ -23,6 +23,7 @@ const {
 } = require("../config/cloudinary");
 const mongoose = require("mongoose");
 const { sendComplaintStatusEmail, sendEmail } = require("../utils/sendEmail");
+const notificationService = require("../services/notificationService");
 
 const getCurrentWorkedSeconds = (complaint) => {
   const base = complaint?.workTracking?.totalSeconds || 0;
@@ -903,7 +904,7 @@ const updateComplaintStatus = async (req, res) => {
 
     // Send notifications
     if (status === "in-progress") {
-      await Notification.createFromTemplate({
+      await notificationService.sendInAppFromTemplate({
         type: "status_change",
         recipient: complaint.user,
         sender: req.user.id,
@@ -918,7 +919,7 @@ const updateComplaintStatus = async (req, res) => {
         },
       });
     } else if (status === "resolved") {
-      await Notification.createFromTemplate({
+      await notificationService.sendInAppFromTemplate({
         type: "complaint_resolved",
         recipient: complaint.user,
         sender: req.user.id,
@@ -934,18 +935,23 @@ const updateComplaintStatus = async (req, res) => {
 
     // Populate and return
     await complaint.populate([
-      { path: "user", select: "name email" },
+      { path: "user", select: "name email notificationPreferences" },
       { path: "category", select: "name color" },
       { path: "resolution.resolvedBy", select: "name" },
     ]);
 
     try {
       if (complaint.user?.email) {
-        await sendComplaintStatusEmail(
+        await notificationService.sendUserEmail(
           complaint.user,
-          complaint,
-          status === "resolved" ? "Resolved" : "In Progress",
-          remarks?.trim(),
+          "complaintUpdates",
+          () =>
+            sendComplaintStatusEmail(
+              complaint.user,
+              complaint,
+              status === "resolved" ? "Resolved" : "In Progress",
+              remarks?.trim(),
+            ),
         );
       }
     } catch (emailError) {
@@ -1058,21 +1064,26 @@ const requestComplaintPayment = async (req, res) => {
 
     try {
       const complaintUser = await User.findById(complaint.user).select(
-        "name email",
+        "name email notificationPreferences",
       );
       if (complaintUser?.email) {
-        await sendEmail({
-          to: complaintUser.email,
-          subject: `Payment Requested for Complaint ${complaint.complaintId}`,
-          html: `<p>Hello ${complaintUser.name || "User"},</p><p>Payment of INR ${Number(amount)} has been requested for complaint <strong>${complaint.complaintId}</strong>.</p><p>Please complete the payment from your dashboard to allow final complaint closure.</p>`,
-          text: `Hello ${complaintUser.name || "User"},\n\nPayment of INR ${Number(amount)} has been requested for complaint ${complaint.complaintId}.\nPlease complete payment from your dashboard to allow final closure.`,
-        });
+        await notificationService.sendUserEmail(
+          complaintUser,
+          "complaintUpdates",
+          () =>
+            sendEmail({
+              to: complaintUser.email,
+              subject: `Payment Requested for Complaint ${complaint.complaintId}`,
+              html: `<p>Hello ${complaintUser.name || "User"},</p><p>Payment of INR ${Number(amount)} has been requested for complaint <strong>${complaint.complaintId}</strong>.</p><p>Please complete the payment from your dashboard to allow final complaint closure.</p>`,
+              text: `Hello ${complaintUser.name || "User"},\n\nPayment of INR ${Number(amount)} has been requested for complaint ${complaint.complaintId}.\nPlease complete payment from your dashboard to allow final closure.`,
+            }),
+        );
       }
     } catch (emailError) {
       console.warn("Payment request email failed:", emailError.message);
     }
 
-    await Notification.create({
+    await notificationService.sendInAppNotification({
       recipient: complaint.user,
       type: "payment_initiated",
       title: "Payment requested for your complaint",
@@ -1192,18 +1203,23 @@ const acknowledgeComplaintPayment = async (req, res) => {
       try {
         const adminUsers = await User.find({
           _id: { $in: admins.map((admin) => admin._id) },
-        }).select("name email");
+        }).select("name email notificationPreferences");
 
         await Promise.all(
           adminUsers
             .filter((admin) => !!admin.email)
             .map((admin) =>
-              sendEmail({
-                to: admin.email,
-                subject: `Payment Acknowledged: ${complaint.complaintId}`,
-                html: `<p>Hello ${admin.name || "Admin"},</p><p>Staff acknowledged payment for complaint <strong>${complaint.complaintId}</strong>. The complaint is now ready for closure.</p>`,
-                text: `Hello ${admin.name || "Admin"},\n\nStaff acknowledged payment for complaint ${complaint.complaintId}. The complaint is now ready for closure.`,
-              }),
+              notificationService.sendUserEmail(
+                admin,
+                "complaintUpdates",
+                () =>
+                  sendEmail({
+                    to: admin.email,
+                    subject: `Payment Acknowledged: ${complaint.complaintId}`,
+                    html: `<p>Hello ${admin.name || "Admin"},</p><p>Staff acknowledged payment for complaint <strong>${complaint.complaintId}</strong>. The complaint is now ready for closure.</p>`,
+                    text: `Hello ${admin.name || "Admin"},\n\nStaff acknowledged payment for complaint ${complaint.complaintId}. The complaint is now ready for closure.`,
+                  }),
+              ),
             ),
         );
       } catch (emailError) {
@@ -1465,7 +1481,7 @@ const startWorkingOnComplaint = async (req, res) => {
     // Notify user
     const staffUser = await User.findById(req.user.id).select("name");
 
-    await Notification.createFromTemplate({
+    await notificationService.sendInAppFromTemplate({
       type: "status_change",
       recipient: complaint.user,
       sender: req.user.id,
@@ -1985,7 +2001,7 @@ const resolveComplaint = async (req, res) => {
     const staffUser = await User.findById(req.user.id).select("name");
 
     // Notify user about resolution
-    await Notification.createFromTemplate({
+    await notificationService.sendInAppFromTemplate({
       type: "complaint_resolved",
       recipient: complaint.user,
       sender: req.user.id,
@@ -2094,14 +2110,26 @@ const requestReassignment = async (req, res) => {
       "name email department",
     );
 
-    // Get suggested staff info if provided
+    // Determine complaint's authoritative organization
+    const complaintOrgId = complaint.organization;
+
+    // Get suggested staff info if provided (must belong to same organization)
     let suggestedStaff = null;
     if (suggestedStaffId) {
       suggestedStaff = await User.findOne({
         _id: suggestedStaffId,
         role: "staff",
         isActive: true,
+        organization: complaintOrgId,
       }).select("name email department");
+
+      if (!suggestedStaff) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Suggested staff member not found in this organization or is inactive",
+        });
+      }
     }
 
     // Add internal note
@@ -2118,14 +2146,20 @@ const requestReassignment = async (req, res) => {
     complaint.timeline.lastUpdatedAt = new Date();
     await complaint.save();
 
-    // Notify all admins
-    const admins = await User.find({
+    // Notify authorized admins: only admins belonging to complaint's organization, plus global super_admins
+    const adminQuery = {
       role: { $in: ["admin", "org_admin", "super_admin"] },
       isActive: true,
-    }).select("_id");
+      $or: [
+        { organization: complaintOrgId },
+        { role: "super_admin" },
+      ],
+    };
+
+    const admins = await User.find(adminQuery).select("_id");
 
     const notificationPromises = admins.map((admin) =>
-      Notification.create({
+      notificationService.sendInAppNotification({
         recipient: admin._id,
         type: "reassignment",
         title: "Reassignment Request",
@@ -2549,7 +2583,17 @@ const getAvailableStaffForSuggestion = async (req, res) => {
   try {
     const { category } = req.query;
 
-    const availableStaff = await User.findAvailableStaff(category || null);
+    if (!req.user.organization) {
+      return res.status(403).json({
+        success: false,
+        message: "Staff member does not belong to any organization",
+      });
+    }
+
+    const availableStaff = await User.findAvailableStaff(
+      req.user.organization,
+      category || null,
+    );
 
     // Filter out self
     const filteredStaff = availableStaff.filter(

@@ -395,6 +395,17 @@ const StaffManagement = () => {
               <p className="text-sm text-gray-500 flex items-center mt-1">
                 <Mail className="w-3 h-3 mr-1" /> {member.email}
               </p>
+              {member.organization ? (
+                <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100">
+                  <Building className="w-3 h-3" />
+                  <span>{member.organization.name || "Assigned Org"}</span>
+                </div>
+              ) : (
+                <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-gray-50 text-gray-500 border border-gray-200">
+                  <Building className="w-3 h-3" />
+                  <span>Unassigned Organization</span>
+                </div>
+              )}
 
               <div className="mt-6 pt-6 border-t border-gray-50">
                 <div className="flex justify-between items-center text-sm">
@@ -672,7 +683,7 @@ const StaffManagement = () => {
                   Performance Report
                 </h2>
                 <p className="text-sm text-gray-500 mt-1">
-                  {selectedStaff.name} - {selectedStaff.department}
+                  {selectedStaff.name} • {selectedStaff.department || "No Department"} • {selectedStaff.organization?.name || "Unassigned Organization"}
                 </p>
               </div>
               <button
@@ -997,7 +1008,7 @@ const StaffManagement = () => {
                 </h2>
                 <p className="text-sm text-gray-500 mt-1">
                   {(selectedStaff.statistics?.feedback?.averageRating || 0).toFixed(1)}/5.0 average rating • 
-                  {selectedStaff.statistics?.feedback?.totalCount || 0} total reviews
+                  {selectedStaff.statistics?.feedback?.totalCount || 0} total reviews • {selectedStaff.organization?.name || "Unassigned Organization"}
                 </p>
               </div>
               <button

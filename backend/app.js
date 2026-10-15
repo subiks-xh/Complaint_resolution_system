@@ -36,6 +36,20 @@ const { errorHandler, notFoundHandler } = require("./middleware/errorHandler");
  */
 const app = express();
 
+// Configure trust proxy safely for reverse proxies (Render, Railway, Fly.io, ALB, etc.)
+// Trusting 1 hop correctly identifies client IP without blindly trusting client-supplied headers
+if (process.env.NODE_ENV === "production" || process.env.TRUST_PROXY) {
+  const trustProxyEnv = process.env.TRUST_PROXY;
+  const trustProxyValue = trustProxyEnv
+    ? (!isNaN(Number(trustProxyEnv))
+        ? Number(trustProxyEnv)
+        : trustProxyEnv === "true"
+          ? 1
+          : trustProxyEnv)
+    : 1;
+  app.set("trust proxy", trustProxyValue);
+}
+
 // Import security middleware
 const { sanitizeMiddleware } = require("./middleware/sanitizer");
 const {
@@ -243,8 +257,8 @@ if (process.env.NODE_ENV === "development") {
  * ================================
  */
 
-// Basic health check
-app.get("/api/health", (req, res) => {
+// Basic health check (standard /api/health and root /health for cloud load balancers)
+const handleBasicHealthCheck = (req, res) => {
   res.status(200).json({
     success: true,
     message: "Server is healthy",
@@ -255,7 +269,10 @@ app.get("/api/health", (req, res) => {
       environment: process.env.NODE_ENV,
     },
   });
-});
+};
+
+app.get("/health", handleBasicHealthCheck);
+app.get("/api/health", handleBasicHealthCheck);
 
 // Detailed health check
 app.get("/api/health/detailed", async (req, res) => {
@@ -324,6 +341,7 @@ app.use(`${API_PREFIX}/users`, userRoutes);
 app.use(`${API_PREFIX}/complaints`, complaintRoutes);
 app.use(`${API_PREFIX}/staff`, staffRoutes);
 app.use(`${API_PREFIX}/admin`, adminRoutes);
+app.use(`${API_PREFIX}/admin/assignments`, assignmentRoutes);
 app.use(`${API_PREFIX}/admin`, assignmentRoutes);
 app.use(`${API_PREFIX}/feedback`, feedbackRoutes);
 app.use(`${API_PREFIX}/categories`, categoryRoutes);
@@ -338,13 +356,24 @@ app.use(`${API_PREFIX}/chatbot`, chatbotRoutes);
  * ================================
  */
 
-if (servesFrontend) {
-  app.use(express.static(frontendDistPath));
+const getServesFrontend = () =>
+  process.env.NODE_ENV === "production" && fs.existsSync(frontendIndexPath);
 
-  app.get(/^\/(?!api(?:\/|$)).*/, (req, res) => {
-    res.sendFile(frontendIndexPath);
-  });
-}
+// Serve static assets from frontend/dist in production
+app.use((req, res, next) => {
+  if (getServesFrontend() && !req.path.startsWith("/api")) {
+    return express.static(frontendDistPath)(req, res, next);
+  }
+  next();
+});
+
+// SPA client route fallback in production
+app.get(/^\/(?!api(?:\/|$)).*/, (req, res, next) => {
+  if (getServesFrontend()) {
+    return res.sendFile(frontendIndexPath);
+  }
+  next();
+});
 
 /**
  * ================================
@@ -366,6 +395,7 @@ app.get("/api", (req, res) => {
         complaints: `${API_PREFIX}/complaints`,
         staff: `${API_PREFIX}/staff`,
         admin: `${API_PREFIX}/admin`,
+        assignments: `${API_PREFIX}/admin/assignments`,
         feedback: `${API_PREFIX}/feedback`,
         categories: `${API_PREFIX}/categories`,
       },
@@ -373,28 +403,30 @@ app.get("/api", (req, res) => {
   });
 });
 
-if (!servesFrontend) {
-  app.get("/", (req, res) => {
-    res.status(200).json({
-      success: true,
-      message: "Welcome to Complaint Resolution System API",
-      data: {
-        version: "1.0.0",
-        documentation: "/api-docs",
-        health: "/api/health",
-        endpoints: {
-          auth: `${API_PREFIX}/auth`,
-          users: `${API_PREFIX}/users`,
-          complaints: `${API_PREFIX}/complaints`,
-          staff: `${API_PREFIX}/staff`,
-          admin: `${API_PREFIX}/admin`,
-          feedback: `${API_PREFIX}/feedback`,
-          categories: `${API_PREFIX}/categories`,
-        },
+app.get("/", (req, res, next) => {
+  if (getServesFrontend()) {
+    return res.sendFile(frontendIndexPath);
+  }
+  res.status(200).json({
+    success: true,
+    message: "Welcome to Complaint Resolution System API",
+    data: {
+      version: "1.0.0",
+      documentation: "/api-docs",
+      health: "/api/health",
+      endpoints: {
+        auth: `${API_PREFIX}/auth`,
+        users: `${API_PREFIX}/users`,
+        complaints: `${API_PREFIX}/complaints`,
+        staff: `${API_PREFIX}/staff`,
+        admin: `${API_PREFIX}/admin`,
+        assignments: `${API_PREFIX}/admin/assignments`,
+        feedback: `${API_PREFIX}/feedback`,
+        categories: `${API_PREFIX}/categories`,
       },
-    });
+    },
   });
-}
+});
 
 /**
  * ================================

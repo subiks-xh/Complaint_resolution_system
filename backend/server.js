@@ -22,6 +22,7 @@ const {
   setupSIGTERMHandler,
 } = require("./middleware/errorHandler");
 const { initSentry } = require("./config/sentry");
+const { assertProductionEnv } = require("./config/validateEnv");
 
 /**
  * Server Configuration
@@ -151,6 +152,13 @@ const startServer = async () => {
     // Setup error handlers
     setupUncaughtExceptionHandler();
 
+    // Validate production configuration before starting services
+    if (process.env.NODE_ENV === "production") {
+      console.log("🔒 Validating production environment configuration...");
+      assertProductionEnv();
+      console.log("✅ Production configuration validated successfully");
+    }
+
     // Initialize Sentry if configured
     const sentryEnabled = initSentry();
     if (sentryEnabled) {
@@ -168,14 +176,14 @@ const startServer = async () => {
     const dbStatus = getConnectionStatus();
     console.log(`✅ Database connected: ${dbStatus.name} @ ${dbStatus.host}`);
 
-    // Start the escalation scheduler
-    if (process.env.ENABLE_SCHEDULER !== "false") {
+    // Start the escalation scheduler (disabled unless explicitly enabled)
+    if (process.env.ENABLE_SCHEDULER === "true") {
       console.log("");
       console.log("⏰ Starting escalation scheduler...");
       startScheduler();
     } else {
       console.log("");
-      console.log("⏸️  Scheduler is disabled");
+      console.log("⏸️  Scheduler is disabled (set ENABLE_SCHEDULER=true to enable)");
     }
 
     // Seed default categories if needed

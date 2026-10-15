@@ -54,6 +54,7 @@ const {
   markNotificationRead,
   markAllNotificationsRead,
 } = require("../controllers/notificationController");
+const assignmentController = require("../controllers/assignmentController");
 
 // Middleware
 const { protect } = require("../middleware/authMiddleware");
@@ -158,6 +159,10 @@ router.get(
  * @access  Private/Admin
  */
 router.post("/complaints/:id/assign", adminValidation.assign, assignComplaint);
+router.post(
+  "/complaints/:id/assign-with-rules",
+  assignmentController.assignComplaintWithRules,
+);
 
 /**
  * @route   PUT /api/admin/complaints/:id/reassign

@@ -15,18 +15,50 @@ const jwt = require("jsonwebtoken");
 const jwtConfig = {
   // Access Token Configuration
   accessToken: {
-    secret:
-      process.env.JWT_ACCESS_SECRET ||
-      "your-super-secret-access-key-change-in-production",
+    get secret() {
+      if (process.env.NODE_ENV === "production") {
+        const sec = process.env.JWT_ACCESS_SECRET;
+        if (
+          !sec ||
+          sec === "your-super-secret-access-key-change-in-production" ||
+          sec.length < 32
+        ) {
+          throw new Error(
+            "JWT_ACCESS_SECRET must be configured with a secure secret (>=32 chars) in production.",
+          );
+        }
+        return sec;
+      }
+      return (
+        process.env.JWT_ACCESS_SECRET ||
+        "your-super-secret-access-key-change-in-production"
+      );
+    },
     expiresIn: process.env.JWT_ACCESS_EXPIRE || "15m", // 15 minutes
     algorithm: "HS256",
   },
 
   // Refresh Token Configuration
   refreshToken: {
-    secret:
-      process.env.JWT_REFRESH_SECRET ||
-      "your-super-secret-refresh-key-change-in-production",
+    get secret() {
+      if (process.env.NODE_ENV === "production") {
+        const sec = process.env.JWT_REFRESH_SECRET;
+        if (
+          !sec ||
+          sec === "your-super-secret-refresh-key-change-in-production" ||
+          sec.length < 32
+        ) {
+          throw new Error(
+            "JWT_REFRESH_SECRET must be configured with a secure secret (>=32 chars) in production.",
+          );
+        }
+        return sec;
+      }
+      return (
+        process.env.JWT_REFRESH_SECRET ||
+        "your-super-secret-refresh-key-change-in-production"
+      );
+    },
     expiresIn: process.env.JWT_REFRESH_EXPIRE || "7d", // 7 days
     algorithm: "HS256",
   },

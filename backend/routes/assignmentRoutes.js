@@ -14,7 +14,8 @@ router.get('/assignment-rules', assignmentController.getAssignmentRules);
 router.put('/assignment-rules/:id', assignmentController.updateAssignmentRule);
 router.delete('/assignment-rules/:id', assignmentController.deleteAssignmentRule);
 
-// Enhanced Assignment Endpoint
+// Enhanced Assignment Endpoints
+router.post('/complaints/:complaintId/assign-with-rules', assignmentController.assignComplaintWithRules);
 router.post('/complaints/:complaintId/assign', assignmentController.assignComplaintWithRules);
 
 // SLA and Analytics

@@ -13,6 +13,7 @@
 const User = require("../models/User");
 const Organization = require("../models/Organization");
 const Notification = require("../models/Notification");
+const notificationService = require("../services/notificationService");
 const {
   generateAccessToken,
   generateRefreshToken,
@@ -804,7 +805,7 @@ const resetPassword = async (req, res) => {
     res.cookie("refreshToken", refreshToken, getCookieOptions("refresh"));
 
     // Send notification
-    await Notification.create({
+    await notificationService.sendInAppNotification({
       recipient: user._id,
       type: "account_update",
       title: "Password Changed",
@@ -1049,7 +1050,7 @@ const changePassword = async (req, res) => {
     res.cookie("refreshToken", refreshToken, getCookieOptions("refresh"));
 
     // Send notification
-    await Notification.create({
+    await notificationService.sendInAppNotification({
       recipient: user._id,
       type: "account_update",
       title: "Password Changed",
@@ -1124,7 +1125,7 @@ const registerStaff = async (req, res) => {
     });
 
     // Send welcome notification
-    await Notification.create({
+    await notificationService.sendInAppNotification({
       recipient: staff._id,
       type: "system_announcement",
       title: "Welcome to Complaint Resolution System",

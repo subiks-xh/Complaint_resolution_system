@@ -1,17 +1,36 @@
 const session = require("express-session");
 const csurf = require("csurf");
 
-const sessionMiddleware = session({
-  secret: process.env.SESSION_SECRET || "complaint-resolution-session-secret",
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
-    maxAge: 1000 * 60 * 60,
-  },
-});
+const getSessionSecret = () => {
+  if (process.env.NODE_ENV === "production") {
+    const secret = process.env.SESSION_SECRET;
+    if (
+      !secret ||
+      secret === "complaint-resolution-session-secret" ||
+      secret.length < 32
+    ) {
+      throw new Error(
+        "SESSION_SECRET must be configured with a secure secret (>=32 chars) in production.",
+      );
+    }
+    return secret;
+  }
+  return process.env.SESSION_SECRET || "complaint-resolution-session-secret";
+};
+
+const sessionMiddleware = (req, res, next) => {
+  return session({
+    secret: getSessionSecret(),
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+      maxAge: 1000 * 60 * 60,
+    },
+  })(req, res, next);
+};
 
 const csrfProtection = csurf();
 

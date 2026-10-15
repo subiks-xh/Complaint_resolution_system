@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const Payment = require("../models/Payment");
 const Complaint = require("../models/Complaint");
 const Notification = require("../models/Notification");
+const notificationService = require("../services/notificationService");
 const User = require("../models/User");
 const { sendEmail } = require("../utils/sendEmail");
 
@@ -184,7 +185,7 @@ const confirmPayment = async (req, res) => {
         }
 
         if (complaint.assignedTo) {
-          await Notification.create({
+          await notificationService.sendInAppNotification({
             recipient: complaint.assignedTo,
             type: "priority_change",
             title: "Complaint Priority Upgraded",
@@ -216,9 +217,9 @@ const confirmPayment = async (req, res) => {
         await complaint.save();
 
         if (markAsPaid && complaint.assignedTo) {
-          await Notification.create({
+          await notificationService.sendInAppNotification({
             recipient: complaint.assignedTo,
-            type: "payment_confirmed",
+            type: "payment_initiated",
             title: "User payment completed",
             message: `Payment for complaint ${complaint.complaintId} is completed. Please acknowledge to allow admin closure.`,
             priority: "high",
@@ -232,15 +233,20 @@ const confirmPayment = async (req, res) => {
 
           try {
             const staff = await User.findById(complaint.assignedTo).select(
-              "name email",
+              "name email notificationPreferences",
             );
             if (staff?.email) {
-              await sendEmail({
-                to: staff.email,
-                subject: `Payment Completed: ${complaint.complaintId}`,
-                html: `<p>Hello ${staff.name || "Staff"},</p><p>User payment is completed for complaint <strong>${complaint.complaintId}</strong>. Please acknowledge the payment to enable admin closure.</p>`,
-                text: `Hello ${staff.name || "Staff"},\n\nUser payment is completed for complaint ${complaint.complaintId}. Please acknowledge the payment to enable admin closure.`,
-              });
+              await notificationService.sendUserEmail(
+                staff,
+                "complaintUpdates",
+                () =>
+                  sendEmail({
+                    to: staff.email,
+                    subject: `Payment Completed: ${complaint.complaintId}`,
+                    html: `<p>Hello ${staff.name || "Staff"},</p><p>User payment is completed for complaint <strong>${complaint.complaintId}</strong>. Please acknowledge the payment to enable admin closure.</p>`,
+                    text: `Hello ${staff.name || "Staff"},\n\nUser payment is completed for complaint ${complaint.complaintId}. Please acknowledge the payment to enable admin closure.`,
+                  }),
+              );
             }
           } catch (emailError) {
             console.warn(
@@ -256,18 +262,23 @@ const confirmPayment = async (req, res) => {
               organization: complaint.organization,
               role: { $in: adminRoles },
               isActive: true,
-            }).select("name email");
+            }).select("name email notificationPreferences");
 
             await Promise.all(
               admins
                 .filter((admin) => !!admin.email)
                 .map((admin) =>
-                  sendEmail({
-                    to: admin.email,
-                    subject: `Payment Received: ${complaint.complaintId}`,
-                    html: `<p>Hello ${admin.name || "Admin"},</p><p>Payment has been received for complaint <strong>${complaint.complaintId}</strong>. Waiting for staff acknowledgement before closure.</p>`,
-                    text: `Hello ${admin.name || "Admin"},\n\nPayment has been received for complaint ${complaint.complaintId}. Waiting for staff acknowledgement before closure.`,
-                  }),
+                  notificationService.sendUserEmail(
+                    admin,
+                    "complaintUpdates",
+                    () =>
+                      sendEmail({
+                        to: admin.email,
+                        subject: `Payment Received: ${complaint.complaintId}`,
+                        html: `<p>Hello ${admin.name || "Admin"},</p><p>Payment has been received for complaint <strong>${complaint.complaintId}</strong>. Waiting for staff acknowledgement before closure.</p>`,
+                        text: `Hello ${admin.name || "Admin"},\n\nPayment has been received for complaint ${complaint.complaintId}. Waiting for staff acknowledgement before closure.`,
+                      }),
+                  ),
                 ),
             );
           } catch (emailError) {

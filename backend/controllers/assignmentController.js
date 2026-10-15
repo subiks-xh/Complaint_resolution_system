@@ -9,6 +9,7 @@ const {
   sendNewAssignmentEmail,
   sendComplaintStatusEmail,
 } = require("../utils/sendEmail");
+const notificationService = require("../services/notificationService");
 
 // Assignment Rule Management
 exports.createAssignmentRule = async (req, res) => {
@@ -143,7 +144,7 @@ exports.deleteAssignmentRule = async (req, res) => {
 // Enhanced Assignment Logic
 exports.assignComplaintWithRules = async (req, res) => {
   try {
-    const { complaintId } = req.params;
+    const complaintId = req.params.complaintId || req.params.id;
     let { staffId, assignmentConfig } = req.body;
     const actorId = req.user.id || req.user._id;
 
@@ -156,11 +157,27 @@ exports.assignComplaintWithRules = async (req, res) => {
       });
     }
 
+    // Tenant check: ensure complaint belongs to requester's organization (unless super_admin)
+    const userOrgId = req.user.organization?._id || req.user.organization;
+    const complaintOrgId = complaint.organization?._id || complaint.organization;
+
+    if (
+      req.user.role !== "super_admin" &&
+      (!userOrgId || !complaintOrgId || complaintOrgId.toString() !== userOrgId.toString())
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized to assign complaints from another organization",
+      });
+    }
+
+    // Determine target organization for rules and logs
+    const targetOrgId = complaintOrgId || userOrgId || null;
+
     // Get applicable assignment rules
-    const applicableRules = await AssignmentRule.findApplicableRules(
-      complaint,
-      req.user.organization,
-    );
+    const applicableRules = targetOrgId
+      ? await AssignmentRule.findApplicableRules(complaint, targetOrgId)
+      : [];
 
     let assignmentRule = null;
     let assignmentMethod = "manual";
@@ -188,11 +205,22 @@ exports.assignComplaintWithRules = async (req, res) => {
       });
     }
 
-    const staff = await User.findById(staffId);
+    const staffQuery = {
+      _id: staffId,
+      role: "staff",
+      isActive: true,
+    };
+    if (req.user.role !== "super_admin") {
+      staffQuery.organization = userOrgId;
+    } else if (complaintOrgId) {
+      // Super admin assigning to a complaint with an organization must assign staff from that complaint's organization
+      staffQuery.organization = complaintOrgId;
+    }
+    const staff = await User.findOne(staffQuery);
     if (!staff) {
       return res.status(404).json({
         success: false,
-        message: "Staff member not found",
+        message: "Staff member not found or does not belong to your organization",
       });
     }
 
@@ -202,42 +230,85 @@ exports.assignComplaintWithRules = async (req, res) => {
       status: { $nin: ["resolved", "closed"] },
     });
 
-    if (currentWorkload >= staff.maxAssignedComplaints) {
+    if (currentWorkload >= (staff.maxAssignedComplaints || 10)) {
       return res.status(400).json({
         success: false,
         message: "Staff member is at maximum capacity",
       });
     }
 
+    // Ensure valid assignmentType according to AssignmentLog schema enum
+    // ['immediate', 'scheduled', 'queue', 'auto', 'manual', 'escalated']
+    const validAssignmentTypes = ['immediate', 'scheduled', 'queue', 'auto', 'manual', 'escalated'];
+    let assignmentType = assignmentConfig?.assignmentType || "auto";
+    if (!validAssignmentTypes.includes(assignmentType)) {
+      assignmentType = "auto";
+    }
+
+    const effectivePriority = assignmentConfig?.priority || complaint.priority || "medium";
+
     // Create assignment log
     const assignmentLog = new AssignmentLog({
       complaint: complaintId,
       assignedTo: staffId,
       assignedBy: actorId,
-      assignmentType: assignmentConfig?.assignmentType || "manual",
-      assignmentMethod,
-      configuration: assignmentConfig || {},
+      assignmentType,
+      assignmentMethod: ['round_robin', 'least_loaded', 'skill_based', 'geographic', 'performance_based', 'manual'].includes(assignmentMethod)
+        ? assignmentMethod
+        : 'manual',
+      configuration: {
+        priority: effectivePriority,
+        dueDate: assignmentConfig?.dueDate,
+        slaOverride: assignmentConfig?.slaOverride || false,
+        customSLA: assignmentConfig?.customSLA,
+        scheduledTime: assignmentConfig?.scheduledTime,
+        assignmentNotes: assignmentConfig?.assignmentNotes,
+        notificationSettings: assignmentConfig?.notificationSettings || {
+          notifyAssignee: true,
+          notifyUser: false,
+          notifySupervisor: false,
+        },
+        escalationEnabled: assignmentConfig?.escalationEnabled !== false,
+      },
       context: {
         staffWorkloadBefore: currentWorkload,
         staffWorkloadAfter: currentWorkload + 1,
         ruleUsed: assignmentRule?._id,
       },
-      organization: req.user.organization,
+      organization: targetOrgId,
     });
 
-    // Update complaint
-    const updateData = {
-      assignedTo: staffId,
-      status: "assigned",
-      assignedAt: new Date(),
-      priority: assignmentConfig?.priority || complaint.priority,
-    };
+    // Update complaint fields
+    complaint.assignedTo = staffId;
+    complaint.assignedBy = actorId;
+    complaint.status = "assigned";
+    complaint.timeline = complaint.timeline || {};
+    complaint.timeline.assignedAt = new Date();
+    complaint.timeline.lastUpdatedAt = new Date();
 
-    if (assignmentConfig?.dueDate) {
-      updateData.dueDate = new Date(assignmentConfig.dueDate);
+    if (assignmentConfig?.priority) {
+      complaint.priority = assignmentConfig.priority;
     }
 
-    await Complaint.findByIdAndUpdate(complaintId, updateData);
+    if (assignmentConfig?.dueDate) {
+      complaint.dueDate = new Date(assignmentConfig.dueDate);
+      complaint.resolutionDeadline = new Date(assignmentConfig.dueDate);
+    } else if (complaint.category && complaint.category.resolutionSLA) {
+      const slaHours = complaint.category.resolutionSLA[complaint.priority] || 48;
+      complaint.resolutionDeadline = new Date(Date.now() + slaHours * 60 * 60 * 1000);
+    }
+
+    complaint.statusHistory.push({
+      status: "assigned",
+      changedBy: actorId,
+      changedByRole: req.user.role === "staff" ? "staff" : "admin",
+      remarks:
+        assignmentConfig?.assignmentNotes ||
+        `Assigned via rule engine (${assignmentMethod}) to ${staff.name}`,
+      changedAt: new Date(),
+    });
+
+    await complaint.save();
     await assignmentLog.save();
 
     // Update assignment rule usage
@@ -259,7 +330,7 @@ exports.assignComplaintWithRules = async (req, res) => {
       success: true,
       message: "Complaint assigned successfully",
       data: {
-        complaint: updateData,
+        complaint,
         assignmentLog: assignmentLog._id,
         assignedStaff: {
           name:
@@ -555,31 +626,43 @@ async function sendAssignmentNotifications(
     });
   }
 
-  // Create notifications
+  // Create notifications filtering by recipient preferences
   if (notifications.length > 0) {
-    await Notification.insertMany(notifications);
+    for (const notif of notifications) {
+      await notificationService.sendInAppNotification(notif);
+    }
   }
 
   try {
     const [assigneeWithEmail, complaintUser] = await Promise.all([
-      User.findById(staff._id).select("name email"),
-      User.findById(complaint.user).select("name email"),
+      User.findById(staff._id).select("name email notificationPreferences"),
+      User.findById(complaint.user).select("name email notificationPreferences"),
     ]);
 
     if (assigneeWithEmail?.email) {
-      await sendNewAssignmentEmail(
+      await notificationService.sendUserEmail(
         assigneeWithEmail,
-        complaint,
-        config?.dueDate,
+        "complaintUpdates",
+        () =>
+          sendNewAssignmentEmail(
+            assigneeWithEmail,
+            complaint,
+            config?.dueDate,
+          ),
       );
     }
 
     if (config?.notifyUser && complaintUser?.email) {
-      await sendComplaintStatusEmail(
+      await notificationService.sendUserEmail(
         complaintUser,
-        complaint,
-        "Assigned",
-        `Assigned to ${staffDisplayName}`,
+        "complaintUpdates",
+        () =>
+          sendComplaintStatusEmail(
+            complaintUser,
+            complaint,
+            "Assigned",
+            `Assigned to ${staffDisplayName}`,
+          ),
       );
     }
   } catch (error) {

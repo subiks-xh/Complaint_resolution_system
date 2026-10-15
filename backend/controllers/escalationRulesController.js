@@ -69,13 +69,30 @@ const createEscalationRule = async (req, res) => {
       });
     }
 
-    // Check if category exists (if provided)
+    let orgId = req.user.organization;
+    if (req.user.role === "super_admin") {
+      if (req.body.organization) {
+        orgId = req.body.organization;
+      }
+    }
+
+    if (!orgId) {
+      return res.status(400).json({
+        success: false,
+        message: "Organization is required to create an escalation rule",
+      });
+    }
+
+    // Check if category exists and belongs to the same organization
     if (category) {
-      const categoryExists = await Category.findById(category);
+      const categoryExists = await Category.findOne({
+        _id: category,
+        organization: orgId,
+      });
       if (!categoryExists) {
         return res.status(400).json({
           success: false,
-          message: "Category not found",
+          message: "Category not found in target organization",
         });
       }
     }
@@ -96,8 +113,8 @@ const createEscalationRule = async (req, res) => {
         autoAssign: actions.autoAssign || false,
       },
       isActive,
-      organization: req.user.organization,
-      createdBy: req.user._id,
+      organization: orgId,
+      createdBy: req.user._id || req.user.id,
     });
 
     await rule.populate("category", "name description");
@@ -251,6 +268,8 @@ const toggleEscalationRule = async (req, res) => {
   }
 };
 
+const { runEscalationCycle } = require("../utils/escalationEngine");
+
 /**
  * @desc    Check and process escalations for all complaints
  * @route   POST /api/admin/escalation-rules/process
@@ -258,7 +277,8 @@ const toggleEscalationRule = async (req, res) => {
  */
 const processEscalations = async (req, res) => {
   try {
-    const results = await checkAndEscalateComplaints();
+    const orgId = req.user.role === "super_admin" ? null : req.user.organization;
+    const results = await runEscalationCycle({ organizationId: orgId });
 
     res.json({
       success: true,
@@ -277,135 +297,10 @@ const processEscalations = async (req, res) => {
 
 /**
  * Internal function to check and escalate complaints
- * This is called by the scheduler and can also be manually triggered
+ * Delegated to unified escalationEngine
  */
-const checkAndEscalateComplaints = async () => {
-  try {
-    console.log("Starting escalation check...");
-
-    // Get all active escalation rules
-    const rules = await EscalationRule.find({ isActive: true })
-      .populate("category", "name")
-      .lean();
-
-    if (rules.length === 0) {
-      console.log("No active escalation rules found");
-      return { processedCount: 0, escalatedCount: 0 };
-    }
-
-    let processedCount = 0;
-    let escalatedCount = 0;
-
-    // Process each rule
-    for (const rule of rules) {
-      console.log(`Processing rule: ${rule.name}`);
-
-      // Build complaint filter based on rule criteria
-      const complaintFilter = {
-        status: { $in: ["new", "in_progress"] }, // Only active complaints
-        priority: rule.priority,
-      };
-
-      // Add organization filter
-      if (rule.organization) {
-        complaintFilter.organization = rule.organization;
-      }
-
-      // Add category filter if specified
-      if (rule.category) {
-        complaintFilter.category = rule.category._id;
-      }
-
-      // Get complaints that match the rule
-      const complaints = await Complaint.find(complaintFilter)
-        .populate("assignedTo", "firstName lastName")
-        .populate("category", "name")
-        .lean();
-
-      console.log(`Found ${complaints.length} complaints for rule: ${rule.name}`);
-
-      for (const complaint of complaints) {
-        processedCount++;
-
-        const now = new Date();
-        const createdAt = new Date(complaint.createdAt);
-        const lastUpdate = new Date(complaint.updatedAt || complaint.createdAt);
-        
-        // Calculate time differences in hours
-        const hoursTotal = (now - createdAt) / (1000 * 60 * 60);
-        const hoursSinceUpdate = (now - lastUpdate) / (1000 * 60 * 60);
-
-        let shouldEscalate = false;
-        let escalationReason = "";
-
-        // Check time threshold
-        if (hoursTotal >= rule.conditions.timeThreshold) {
-          shouldEscalate = true;
-          escalationReason += `Time threshold exceeded (${Math.floor(hoursTotal)}h). `;
-        }
-
-        // Check no update threshold
-        if (hoursSinceUpdate >= rule.conditions.noUpdateThreshold) {
-          shouldEscalate = true;
-          escalationReason += `No update for ${Math.floor(hoursSinceUpdate)} hours. `;
-        }
-
-        // Check response threshold (for new complaints)
-        if (complaint.status === "new" && hoursTotal >= rule.conditions.responseThreshold) {
-          shouldEscalate = true;
-          escalationReason += `Response threshold exceeded. `;
-        }
-
-        if (shouldEscalate) {
-          console.log(`Escalating complaint ${complaint.complaintId}: ${escalationReason}`);
-
-          // Execute escalation actions
-          const updateData = {
-            status: "escalated",
-            escalatedAt: now,
-            escalationReason: escalationReason.trim(),
-            updatedAt: now,
-          };
-
-          // Increase priority if specified
-          if (rule.actions.increasePriority) {
-            if (complaint.priority === "low") updateData.priority = "medium";
-            else if (complaint.priority === "medium") updateData.priority = "high";
-          }
-
-          // Update the complaint
-          await Complaint.findByIdAndUpdate(complaint._id, updateData);
-
-          // Send notifications if specified
-          if (rule.actions.sendNotification) {
-            await sendEscalationNotification(
-              { ...complaint, ...updateData },
-              "automatic"
-            );
-          }
-
-          // Send SLA breach notification for high priority items
-          if (complaint.priority === "high" || updateData.priority === "high") {
-            await sendSLABreachNotification({ ...complaint, ...updateData });
-          }
-
-          escalatedCount++;
-        }
-      }
-    }
-
-    console.log(`Escalation check completed. Processed: ${processedCount}, Escalated: ${escalatedCount}`);
-
-    return {
-      processedCount,
-      escalatedCount,
-      rulesProcessed: rules.length,
-      timestamp: new Date(),
-    };
-  } catch (err) {
-    console.error("Check and escalate complaints error:", err);
-    throw err;
-  }
+const checkAndEscalateComplaints = async (options = {}) => {
+  return runEscalationCycle(options);
 };
 
 module.exports = {

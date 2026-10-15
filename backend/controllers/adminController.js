@@ -16,6 +16,7 @@ const Organization = require("../models/Organization");
 const Feedback = require("../models/Feedback");
 const StaffFeedback = require("../models/StaffFeedback");
 const Notification = require("../models/Notification");
+const notificationService = require("../services/notificationService");
 const mongoose = require("mongoose");
 const PDFDocument = require("pdfkit");
 
@@ -600,10 +601,11 @@ const assignComplaint = async (req, res) => {
     const { staffId, remarks, priority } = req.body;
 
     // Validate complaint exists
-    const complaint = await Complaint.findOne({
-      _id: id,
-      organization: req.user.organization,
-    });
+    const complaintQuery = { _id: id };
+    if (req.user.role !== "super_admin") {
+      complaintQuery.organization = req.user.organization;
+    }
+    const complaint = await Complaint.findOne(complaintQuery);
     if (!complaint) {
       return res.status(404).json({
         success: false,
@@ -612,12 +614,17 @@ const assignComplaint = async (req, res) => {
     }
 
     // Validate staff exists and is active
-    const staff = await User.findOne({
+    const staffQuery = {
       _id: staffId,
       role: "staff",
       isActive: true,
-      organization: req.user.organization,
-    });
+    };
+    if (req.user.role !== "super_admin") {
+      staffQuery.organization = req.user.organization;
+    } else if (complaint.organization) {
+      staffQuery.organization = complaint.organization;
+    }
+    const staff = await User.findOne(staffQuery);
 
     if (!staff) {
       return res.status(400).json({
@@ -673,33 +680,33 @@ const assignComplaint = async (req, res) => {
 
     // Create notifications
     await Promise.all([
-      // Notify staff
-      Notification.createFromTemplate({
-        type: "new_assignment",
-        recipient: staffId,
-        sender: req.user.id,
-        complaint: complaint._id,
-        customData: {
-          complaintTitle: complaint.title,
-          complaintId: complaint.complaintId,
-          priority: complaint.priority,
-          deadline: complaint.resolutionDeadline,
-        },
-      }),
+       // Notify staff
+       notificationService.sendInAppFromTemplate({
+         type: "new_assignment",
+         recipient: staffId,
+         sender: req.user.id,
+         complaint: complaint._id,
+         customData: {
+           complaintTitle: complaint.title,
+           complaintId: complaint.complaintId,
+           priority: complaint.priority,
+           deadline: complaint.resolutionDeadline,
+         },
+       }),
 
-      // Notify user
-      Notification.createFromTemplate({
-        type: "complaint_assigned",
-        recipient: complaint.user,
-        sender: req.user.id,
-        complaint: complaint._id,
-        customData: {
-          complaintTitle: complaint.title,
-          complaintId: complaint.complaintId,
-          staffName: staff.name,
-        },
-      }),
-    ]);
+       // Notify user
+       notificationService.sendInAppFromTemplate({
+         type: "complaint_assigned",
+         recipient: complaint.user,
+         sender: req.user.id,
+         complaint: complaint._id,
+         customData: {
+           complaintTitle: complaint.title,
+           complaintId: complaint.complaintId,
+           staffName: staff.name,
+         },
+       }),
+     ]);
 
     // Populate and return updated complaint
     await complaint.populate([
@@ -793,7 +800,7 @@ const reassignComplaint = async (req, res) => {
     // Notifications
     const notifications = [
       // Notify new staff
-      Notification.createFromTemplate({
+      notificationService.sendInAppFromTemplate({
         type: "new_assignment",
         recipient: staffId,
         sender: req.user.id,
@@ -809,7 +816,7 @@ const reassignComplaint = async (req, res) => {
     // Notify previous assignee if exists
     if (previousAssignee) {
       notifications.push(
-        Notification.createFromTemplate({
+        notificationService.sendInAppFromTemplate({
           type: "assignment_removed",
           recipient: previousAssignee,
           sender: req.user.id,
@@ -904,7 +911,7 @@ const bulkAssignComplaints = async (req, res) => {
         await complaint.save();
 
         // Create notification
-        await Notification.createFromTemplate({
+        await notificationService.sendInAppFromTemplate({
           type: "new_assignment",
           recipient: staffId,
           sender: req.user.id,
@@ -948,14 +955,25 @@ const bulkAssignComplaints = async (req, res) => {
  */
 const getEscalatedComplaints = async (req, res) => {
   try {
-    const { page = 1, limit = 10 } = req.query;
+    const { page = 1, limit = 10, organization } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     const query = {
       status: "escalated",
-      organization: req.user.organization,
       isArchived: false,
     };
+
+    if (req.user.role !== "super_admin") {
+      query.organization = req.user.organization;
+    } else if (organization) {
+      if (!mongoose.Types.ObjectId.isValid(organization)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid organization ID format",
+        });
+      }
+      query.organization = new mongoose.Types.ObjectId(organization);
+    }
 
     const [complaints, total] = await Promise.all([
       Complaint.find(query)
@@ -1013,6 +1031,50 @@ const escalateComplaint = async (req, res) => {
       });
     }
 
+    // Role-based tenant boundary enforcement
+    if (req.user.role !== "super_admin") {
+      if (
+        !req.user.organization ||
+        !complaint.organization ||
+        complaint.organization.toString() !== req.user.organization.toString()
+      ) {
+        return res.status(404).json({
+          success: false,
+          message: "Complaint not found",
+        });
+      }
+    }
+
+    // Validate reassignment target if provided
+    if (reassignTo) {
+      const targetStaff = await User.findOne({
+        _id: reassignTo,
+        role: "staff",
+        isActive: true,
+      });
+
+      if (!targetStaff) {
+        return res.status(400).json({
+          success: false,
+          message: "Selected staff member not found or inactive",
+        });
+      }
+
+      // If org_admin, target staff must belong to the same organization
+      if (
+        req.user.role !== "super_admin" &&
+        (!targetStaff.organization ||
+          targetStaff.organization.toString() !==
+            complaint.organization.toString())
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Reassignment target must belong to the complaint's organization",
+        });
+      }
+    }
+
     if (complaint.status === "escalated") {
       return res.status(400).json({
         success: false,
@@ -1045,7 +1107,7 @@ const escalateComplaint = async (req, res) => {
     // Notify current assignee if exists
     if (complaint.assignedTo) {
       notifications.push(
-        Notification.createFromTemplate({
+        notificationService.sendInAppFromTemplate({
           type: "complaint_escalated",
           recipient: complaint.assignedTo,
           sender: req.user.id,
@@ -1061,7 +1123,7 @@ const escalateComplaint = async (req, res) => {
 
     // Notify user
     notifications.push(
-      Notification.createFromTemplate({
+      notificationService.sendInAppFromTemplate({
         type: "complaint_updated",
         recipient: complaint.user,
         sender: req.user.id,
@@ -1103,12 +1165,33 @@ const escalateComplaint = async (req, res) => {
  */
 const getAllStaff = async (req, res) => {
   try {
-    const { department, isActive, search, page = 1, limit = 20 } = req.query;
+    const { department, isActive, search, organization, page = 1, limit = 20 } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    let targetOrgId = null;
+    if (req.user.role === "super_admin") {
+      if (organization) {
+        if (!mongoose.Types.ObjectId.isValid(organization)) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid organization ID format",
+          });
+        }
+        targetOrgId = new mongoose.Types.ObjectId(organization);
+      }
+    } else {
+      if (!req.user.organization) {
+        return res.status(403).json({
+          success: false,
+          message: "User does not belong to any organization",
+        });
+      }
+      targetOrgId = new mongoose.Types.ObjectId(req.user.organization);
+    }
 
     const query = {
       role: "staff",
-      organization: new mongoose.Types.ObjectId(req.user.organization),
+      ...(targetOrgId ? { organization: targetOrgId } : {}),
     };
 
     if (department) {
@@ -1210,6 +1293,14 @@ const getAllStaff = async (req, res) => {
       },
       {
         $lookup: {
+          from: "organizations",
+          localField: "organization",
+          foreignField: "_id",
+          as: "organizationDetails",
+        },
+      },
+      {
+        $lookup: {
           from: "categories",
           localField: "specializations",
           foreignField: "_id",
@@ -1295,10 +1386,18 @@ const getAllStaff = async (req, res) => {
           },
         },
         specializations: member.specializationDetails,
+        organization: member.organizationDetails?.[0]
+          ? {
+              _id: member.organizationDetails[0]._id,
+              name: member.organizationDetails[0].name,
+              code: member.organizationDetails[0].code,
+            }
+          : null,
         complaintsByStatus: undefined,
         complaintFeedbackStats: undefined,
         staffFeedbackStats: undefined,
         specializationDetails: undefined,
+        organizationDetails: undefined,
       };
     });
 
@@ -1541,11 +1640,15 @@ const getStaffPerformance = async (req, res) => {
     const { id } = req.params;
     const { startDate, endDate } = req.query;
 
-    const staff = await User.findOne({
+    const staffQuery = {
       _id: id,
       role: "staff",
-      organization: req.user.organization,
-    });
+      ...(req.user.role === "super_admin"
+        ? {}
+        : { organization: req.user.organization }),
+    };
+
+    const staff = await User.findOne(staffQuery);
     if (!staff) {
       return res.status(404).json({
         success: false,
@@ -1705,11 +1808,15 @@ const updateStaffStatus = async (req, res) => {
     const { id } = req.params;
     const { isActive } = req.body;
 
-    const staff = await User.findOne({
+    const staffQuery = {
       _id: id,
       role: "staff",
-      organization: req.user.organization,
-    });
+      ...(req.user.role === "super_admin"
+        ? {}
+        : { organization: req.user.organization }),
+    };
+
+    const staff = await User.findOne(staffQuery);
     if (!staff) {
       return res.status(404).json({
         success: false,
@@ -1759,11 +1866,15 @@ const updateStaffSpecializations = async (req, res) => {
     const { id } = req.params;
     const { specializations, maxAssignedComplaints } = req.body;
 
-    const staff = await User.findOne({
+    const staffQuery = {
       _id: id,
       role: "staff",
-      organization: req.user.organization,
-    });
+      ...(req.user.role === "super_admin"
+        ? {}
+        : { organization: req.user.organization }),
+    };
+
+    const staff = await User.findOne(staffQuery);
     if (!staff) {
       return res.status(404).json({
         success: false,
@@ -1821,6 +1932,20 @@ const closeComplaint = async (req, res) => {
       });
     }
 
+    // Role-based tenant boundary enforcement
+    if (req.user.role !== "super_admin") {
+      if (
+        !req.user.organization ||
+        !complaint.organization ||
+        complaint.organization.toString() !== req.user.organization.toString()
+      ) {
+        return res.status(404).json({
+          success: false,
+          message: "Complaint not found",
+        });
+      }
+    }
+
     if (complaint.status === "closed") {
       return res.status(400).json({
         success: false,
@@ -1856,7 +1981,7 @@ const closeComplaint = async (req, res) => {
     await complaint.save();
 
     // Notify user
-    await Notification.createFromTemplate({
+    await notificationService.sendInAppFromTemplate({
       type: "complaint_closed",
       recipient: complaint.user,
       sender: req.user.id,
@@ -1891,12 +2016,15 @@ const getStaffFeedback = async (req, res) => {
     const { id } = req.params;
     const { page = 1, limit = 20, category, feedbackType } = req.query;
 
-    // Verify staff member exists and belongs to same organization
-    const staff = await User.findOne({
+    const staffQuery = {
       _id: id,
       role: "staff",
-      organization: req.user.organization,
-    });
+      ...(req.user.role === "super_admin"
+        ? {}
+        : { organization: req.user.organization }),
+    };
+
+    const staff = await User.findOne(staffQuery);
 
     if (!staff) {
       return res.status(404).json({
@@ -2053,12 +2181,15 @@ const addStaffFeedback = async (req, res) => {
       relatedComplaint,
     } = req.body;
 
-    // Verify staff member exists and belongs to same organization
-    const staff = await User.findOne({
+    const staffQuery = {
       _id: id,
       role: "staff",
-      organization: req.user.organization,
-    });
+      ...(req.user.role === "super_admin"
+        ? {}
+        : { organization: req.user.organization }),
+    };
+
+    const staff = await User.findOne(staffQuery);
 
     if (!staff) {
       return res.status(404).json({
@@ -2069,11 +2200,15 @@ const addStaffFeedback = async (req, res) => {
 
     // Validate related complaint if provided
     if (relatedComplaint) {
-      const complaint = await Complaint.findOne({
+      const complaintQuery = {
         _id: relatedComplaint,
         assignedTo: id,
-        organization: req.user.organization,
-      });
+        ...(req.user.role === "super_admin"
+          ? {}
+          : { organization: req.user.organization }),
+      };
+
+      const complaint = await Complaint.findOne(complaintQuery);
 
       if (!complaint) {
         return res.status(404).json({
@@ -2134,7 +2269,29 @@ const addStaffFeedback = async (req, res) => {
  */
 const getAnalytics = async (req, res) => {
   try {
-    const { period = "30d" } = req.query;
+    const { period = "30d", organization: queryOrg } = req.query;
+
+    // Tenant isolation scoping
+    let targetOrgId = null;
+    if (req.user.role === "super_admin") {
+      if (queryOrg) {
+        if (!mongoose.Types.ObjectId.isValid(queryOrg)) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid organization ID format",
+          });
+        }
+        targetOrgId = new mongoose.Types.ObjectId(queryOrg);
+      }
+    } else {
+      if (!req.user.organization) {
+        return res.status(403).json({
+          success: false,
+          message: "User does not belong to any organization",
+        });
+      }
+      targetOrgId = new mongoose.Types.ObjectId(req.user.organization);
+    }
 
     // Parse period
     let daysBack = 30;
@@ -2148,6 +2305,19 @@ const getAnalytics = async (req, res) => {
 
     const startDate = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
 
+    // Complaint match filter (scoped by tenant and date)
+    const complaintMatch = {
+      createdAt: { $gte: startDate },
+      ...(targetOrgId ? { organization: targetOrgId } : {}),
+    };
+
+    // Staff match filter (scoped by tenant)
+    const staffMatch = {
+      role: "staff",
+      isActive: true,
+      ...(targetOrgId ? { organization: targetOrgId } : {}),
+    };
+
     const [
       complaintTrends,
       categoryBreakdown,
@@ -2158,7 +2328,7 @@ const getAnalytics = async (req, res) => {
     ] = await Promise.all([
       // Complaint trends over time
       Complaint.aggregate([
-        { $match: { createdAt: { $gte: startDate } } },
+        { $match: complaintMatch },
         {
           $group: {
             _id: {
@@ -2175,7 +2345,7 @@ const getAnalytics = async (req, res) => {
 
       // Category breakdown
       Complaint.aggregate([
-        { $match: { createdAt: { $gte: startDate } } },
+        { $match: complaintMatch },
         {
           $group: {
             _id: "$category",
@@ -2226,7 +2396,7 @@ const getAnalytics = async (req, res) => {
 
       // Top performing staff
       User.aggregate([
-        { $match: { role: "staff", isActive: true } },
+        { $match: staffMatch },
         {
           $lookup: {
             from: "complaints",
@@ -2236,6 +2406,7 @@ const getAnalytics = async (req, res) => {
                 $match: {
                   $expr: { $eq: ["$assignedTo", "$$staffId"] },
                   createdAt: { $gte: startDate },
+                  ...(targetOrgId ? { organization: targetOrgId } : {}),
                 },
               },
             ],
@@ -2280,7 +2451,7 @@ const getAnalytics = async (req, res) => {
 
       // SLA metrics
       Complaint.aggregate([
-        { $match: { createdAt: { $gte: startDate } } },
+        { $match: complaintMatch },
         {
           $group: {
             _id: null,
@@ -2303,7 +2474,23 @@ const getAnalytics = async (req, res) => {
 
       // Feedback trends
       Feedback.aggregate([
-        { $match: { createdAt: { $gte: startDate } } },
+        {
+          $lookup: {
+            from: "complaints",
+            localField: "complaint",
+            foreignField: "_id",
+            as: "complaintInfo",
+          },
+        },
+        { $unwind: "$complaintInfo" },
+        {
+          $match: {
+            createdAt: { $gte: startDate },
+            ...(targetOrgId
+              ? { "complaintInfo.organization": targetOrgId }
+              : {}),
+          },
+        },
         {
           $group: {
             _id: {
@@ -2318,7 +2505,7 @@ const getAnalytics = async (req, res) => {
 
       // Peak hours analysis
       Complaint.aggregate([
-        { $match: { createdAt: { $gte: startDate } } },
+        { $match: complaintMatch },
         {
           $group: {
             _id: { $hour: "$createdAt" },
@@ -2362,9 +2549,36 @@ const getAnalytics = async (req, res) => {
  */
 const exportComplaints = async (req, res) => {
   try {
-    const { format = "json", status, startDate, endDate } = req.query;
+    const {
+      format = "json",
+      status,
+      startDate,
+      endDate,
+      organization: queryOrg,
+    } = req.query;
 
     const query = {};
+
+    // Organization scoping
+    if (req.user.role === "super_admin") {
+      if (queryOrg) {
+        if (!mongoose.Types.ObjectId.isValid(queryOrg)) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid organization ID format",
+          });
+        }
+        query.organization = new mongoose.Types.ObjectId(queryOrg);
+      }
+    } else {
+      if (!req.user.organization) {
+        return res.status(403).json({
+          success: false,
+          message: "User does not belong to any organization",
+        });
+      }
+      query.organization = new mongoose.Types.ObjectId(req.user.organization);
+    }
 
     if (status) {
       query.status = status;
@@ -2464,7 +2678,7 @@ const createAnnouncement = async (req, res) => {
     const userIds = users.map((u) => u._id);
 
     // Create bulk notifications
-    await Notification.createBulk(userIds, {
+    await notificationService.sendBulkInAppNotifications(userIds, {
       type: "system_announcement",
       title,
       message,

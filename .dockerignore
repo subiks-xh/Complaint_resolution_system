@@ -4,6 +4,27 @@ frontend/dist
 backend/uploads
 backend/logs
 .git
+.gitignore
 .vscode
 *.log
 coverage
+
+# Environment variables & secrets
+.env
+.env.*
+**/.env
+**/.env.*
+*.pem
+*.key
+*.cert
+
+# Test suites & audit reports
+backend/__tests__
+project-audit-report
+test-output.txt
+*.test.js
+*.spec.js
+
+# OS artifacts
+.DS_Store
+Thumbs.db

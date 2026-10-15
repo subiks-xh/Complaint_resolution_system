@@ -75,10 +75,32 @@ const createLocalStorage = (destination = "uploads") => {
 };
 
 /**
+ * Disabled Production Storage Engine
+ * Rejects uploads when Cloudinary is unconfigured in production to prevent data loss on ephemeral container storage.
+ */
+const createDisabledProductionStorage = () => {
+  return {
+    _handleFile: (req, file, cb) => {
+      const error = new Error(
+        "Cloud storage (Cloudinary) is not configured. Local disk uploads are disabled in production to prevent data loss on ephemeral storage.",
+      );
+      error.code = "STORAGE_NOT_CONFIGURED";
+      cb(error);
+    },
+    _removeFile: (req, file, cb) => {
+      cb(null);
+    },
+  };
+};
+
+/**
  * Cloudinary Storage Configuration
  */
 const createCloudinaryStorage = (folder = "complaint-system/uploads") => {
   if (!isCloudinaryConfigured) {
+    if (process.env.NODE_ENV === "production") {
+      return createDisabledProductionStorage();
+    }
     console.warn("Cloudinary not configured, falling back to local storage");
     return createLocalStorage();
   }
@@ -169,7 +191,9 @@ const createUploader = (options = {}) => {
   // Choose storage
   const storage = useCloudinary
     ? createCloudinaryStorage(cloudinaryFolder)
-    : createLocalStorage(destination);
+    : process.env.NODE_ENV === "production"
+      ? createDisabledProductionStorage()
+      : createLocalStorage(destination);
 
   return multer({
     storage,
@@ -412,6 +436,15 @@ const handleUploadError = (err, res) => {
       success: false,
       message: err.message,
       code: err.code,
+    });
+  }
+
+  // Storage configuration error (unconfigured in production)
+  if (err.code === "STORAGE_NOT_CONFIGURED") {
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+      code: "STORAGE_NOT_CONFIGURED",
     });
   }
 

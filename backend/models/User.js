@@ -103,12 +103,18 @@ const userSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Organization",
       required: function () {
-        // Un-onboarded Google users can exist temporarily without organization.
+        // Super Admins operate globally and have no organization.
         if (this.role === "super_admin") {
           return false;
         }
 
+        // Un-onboarded Google users can exist temporarily without organization.
         if (this.role === "user" && this.isOnboarded === false) {
+          return false;
+        }
+
+        // Staff members can be initially registered or imported without an assigned organization.
+        if (this.role === "staff") {
           return false;
         }
 
@@ -497,6 +503,12 @@ userSchema.methods.toPublicProfile = function () {
     isOnboarded: this.isOnboarded,
     onboardingCompletedAt: this.onboardingCompletedAt,
     onboardingProfile: this.onboardingProfile,
+    notificationPreferences: this.notificationPreferences || {
+      email: true,
+      inApp: true,
+      complaintUpdates: true,
+      escalationAlerts: true,
+    },
     createdAt: this.createdAt,
   };
 };

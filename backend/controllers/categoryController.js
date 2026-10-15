@@ -10,6 +10,7 @@
 
 const Category = require("../models/Category");
 const Complaint = require("../models/Complaint");
+const Organization = require("../models/Organization");
 const mongoose = require("mongoose");
 
 /**
@@ -218,10 +219,40 @@ const createCategory = async (req, res) => {
       displayOrder,
     } = req.body;
 
+    // Resolve organization context
+    let targetOrg = req.user.organization;
+    if (req.user.role === "super_admin") {
+      targetOrg = req.body.organization || req.user.organization;
+    }
+
+    if (!targetOrg) {
+      return res.status(400).json({
+        success: false,
+        message: "Organization context is required to create a category",
+      });
+    }
+
+    // Validate organization ID format
+    if (!mongoose.Types.ObjectId.isValid(targetOrg)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid organization ID format",
+      });
+    }
+
+    // Verify organization exists
+    const orgExists = await Organization.findById(targetOrg);
+    if (!orgExists) {
+      return res.status(400).json({
+        success: false,
+        message: "Target organization not found",
+      });
+    }
+
     // Check for duplicate name in this organization
     const existingCategory = await Category.findOne({
       name: { $regex: new RegExp(`^${name}$`, "i") },
-      organization: req.user.organization,
+      organization: targetOrg,
     });
 
     if (existingCategory) {
@@ -234,18 +265,21 @@ const createCategory = async (req, res) => {
 
     // Validate parent if provided
     if (parent) {
-      const parentCategory = await Category.findById(parent);
+      const parentCategory = await Category.findOne({
+        _id: parent,
+        organization: targetOrg,
+      });
       if (!parentCategory) {
         return res.status(400).json({
           success: false,
-          message: "Parent category not found",
+          message: "Parent category not found in this organization",
         });
       }
     }
 
     const category = await Category.create({
       name,
-      organization: req.user.organization,
+      organization: targetOrg,
       description,
       icon: icon || "folder",
       color: color || "#3B82F6",
@@ -305,10 +339,22 @@ const updateCategory = async (req, res) => {
     delete updateData.statistics;
     delete updateData.organization; // Prevent org move
 
-    const category = await Category.findOne({
-      _id: id,
-      organization: req.user.organization,
-    });
+    let category;
+    if (req.user.role === "super_admin") {
+      category = await Category.findById(id);
+    } else {
+      if (!req.user.organization) {
+        return res.status(403).json({
+          success: false,
+          message: "Organization context required",
+        });
+      }
+      category = await Category.findOne({
+        _id: id,
+        organization: req.user.organization,
+      });
+    }
+
     if (!category) {
       return res.status(404).json({
         success: false,
@@ -316,12 +362,14 @@ const updateCategory = async (req, res) => {
       });
     }
 
+    const targetOrg = category.organization;
+
     // Check for duplicate name if name is being changed
     if (updateData.name && updateData.name !== category.name) {
       const existingCategory = await Category.findOne({
         name: { $regex: new RegExp(`^${updateData.name}$`, "i") },
         _id: { $ne: id },
-        organization: req.user.organization,
+        organization: targetOrg,
       });
 
       if (existingCategory) {
@@ -347,12 +395,12 @@ const updateCategory = async (req, res) => {
 
       const parentCategory = await Category.findOne({
         _id: updateData.parent,
-        organization: req.user.organization,
+        organization: targetOrg,
       });
       if (!parentCategory) {
         return res.status(400).json({
           success: false,
-          message: "Parent category not found",
+          message: "Parent category not found in this organization",
         });
       }
 
@@ -401,10 +449,22 @@ const deleteCategory = async (req, res) => {
     const { id } = req.params;
     const { reassignTo, forceDelete = "false" } = req.query;
 
-    const category = await Category.findOne({
-      _id: id,
-      organization: req.user.organization,
-    });
+    let category;
+    if (req.user.role === "super_admin") {
+      category = await Category.findById(id);
+    } else {
+      if (!req.user.organization) {
+        return res.status(403).json({
+          success: false,
+          message: "Organization context required",
+        });
+      }
+      category = await Category.findOne({
+        _id: id,
+        organization: req.user.organization,
+      });
+    }
+
     if (!category) {
       return res.status(404).json({
         success: false,
@@ -412,10 +472,12 @@ const deleteCategory = async (req, res) => {
       });
     }
 
+    const targetOrg = category.organization;
+
     // Check for complaints using this category
     const complaintCount = await Complaint.countDocuments({
       category: id,
-      organization: req.user.organization, // Redundant if IDs are unique but good practice
+      organization: targetOrg, // Redundant if IDs are unique but good practice
     });
 
     if (complaintCount > 0) {
@@ -431,7 +493,7 @@ const deleteCategory = async (req, res) => {
         // Validate reassignment category
         const newCategory = await Category.findOne({
           _id: reassignTo,
-          organization: req.user.organization,
+          organization: targetOrg,
         });
         if (!newCategory) {
           return res.status(400).json({
@@ -442,7 +504,7 @@ const deleteCategory = async (req, res) => {
 
         // Reassign complaints
         await Complaint.updateMany(
-          { category: id, organization: req.user.organization },
+          { category: id, organization: targetOrg },
           { $set: { category: reassignTo } },
         );
       }
@@ -451,19 +513,19 @@ const deleteCategory = async (req, res) => {
     // Check for child categories
     const childCount = await Category.countDocuments({
       parent: id,
-      organization: req.user.organization,
+      organization: targetOrg,
     });
     if (childCount > 0) {
       // Update children to have no parent
       await Category.updateMany(
-        { parent: id, organization: req.user.organization },
+        { parent: id, organization: targetOrg },
         { $set: { parent: null } },
       );
     }
 
     await Category.findOneAndDelete({
       _id: id,
-      organization: req.user.organization,
+      organization: targetOrg,
     });
 
     res.status(200).json({
@@ -492,10 +554,22 @@ const toggleCategoryStatus = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const category = await Category.findOne({
-      _id: id,
-      organization: req.user.organization,
-    });
+    let category;
+    if (req.user.role === "super_admin") {
+      category = await Category.findById(id);
+    } else {
+      if (!req.user.organization) {
+        return res.status(403).json({
+          success: false,
+          message: "Organization context required",
+        });
+      }
+      category = await Category.findOne({
+        _id: id,
+        organization: req.user.organization,
+      });
+    }
+
     if (!category) {
       return res.status(404).json({
         success: false,
@@ -503,12 +577,14 @@ const toggleCategoryStatus = async (req, res) => {
       });
     }
 
+    const targetOrg = category.organization;
+
     // If deactivating, check for active complaints
     if (category.isActive) {
       const activeComplaints = await Complaint.countDocuments({
         category: id,
         status: { $nin: ["resolved", "closed"] },
-        organization: req.user.organization,
+        organization: targetOrg,
       });
 
       if (activeComplaints > 0) {
@@ -544,9 +620,25 @@ const toggleCategoryStatus = async (req, res) => {
  */
 const getCategoryTree = async (req, res) => {
   try {
-    const tree = await Category.getTree({
-      organization: req.user.organization,
-    });
+    let orgScope;
+    if (req.user) {
+      if (req.user.role === "super_admin") {
+        orgScope = req.query.organization || null;
+      } else {
+        orgScope = req.user.organization;
+      }
+    } else {
+      orgScope = req.query.organization || null;
+      if (!orgScope) {
+        return res.status(400).json({
+          success: false,
+          message: "Organization context required",
+        });
+      }
+    }
+
+    const matchFilter = orgScope ? { organization: orgScope } : {};
+    const tree = await Category.getTree(matchFilter);
 
     res.status(200).json({
       success: true,
@@ -571,10 +663,22 @@ const getCategoryStats = async (req, res) => {
     const { id } = req.params;
     const { startDate, endDate } = req.query;
 
-    const category = await Category.findOne({
-      _id: id,
-      organization: req.user.organization,
-    });
+    let category;
+    if (req.user.role === "super_admin") {
+      category = await Category.findById(id);
+    } else {
+      if (!req.user.organization) {
+        return res.status(403).json({
+          success: false,
+          message: "Organization context required",
+        });
+      }
+      category = await Category.findOne({
+        _id: id,
+        organization: req.user.organization,
+      });
+    }
+
     if (!category) {
       return res.status(404).json({
         success: false,
@@ -582,13 +686,15 @@ const getCategoryStats = async (req, res) => {
       });
     }
 
+    const targetOrg = category.organization;
+
     const dateFilter = {};
     if (startDate) dateFilter.$gte = new Date(startDate);
     if (endDate) dateFilter.$lte = new Date(endDate);
 
     const matchStage = {
       category: new mongoose.Types.ObjectId(id),
-      organization: req.user.organization, // Force org match
+      organization: targetOrg, // Force org match
     };
     if (Object.keys(dateFilter).length > 0) {
       matchStage.createdAt = dateFilter;
@@ -659,7 +765,7 @@ const getCategoryStats = async (req, res) => {
           {
             $match: {
               category: new mongoose.Types.ObjectId(id),
-              organization: req.user.organization,
+              organization: targetOrg,
               createdAt: {
                 $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
               },
@@ -745,7 +851,22 @@ const updateCategorySLA = async (req, res) => {
     const { id } = req.params;
     const { resolutionSLA, escalationConfig } = req.body;
 
-    const category = await Category.findById(id);
+    let category;
+    if (req.user.role === "super_admin") {
+      category = await Category.findById(id);
+    } else {
+      if (!req.user.organization) {
+        return res.status(403).json({
+          success: false,
+          message: "Organization context required",
+        });
+      }
+      category = await Category.findOne({
+        _id: id,
+        organization: req.user.organization,
+      });
+    }
+
     if (!category) {
       return res.status(404).json({
         success: false,
@@ -866,16 +987,54 @@ const reorderCategories = async (req, res) => {
       });
     }
 
+    const isSuperAdmin = req.user.role === "super_admin";
+    if (!isSuperAdmin && !req.user.organization) {
+      return res.status(403).json({
+        success: false,
+        message: "Organization context required",
+      });
+    }
+
+    // Validate that order has valid ObjectIds and no duplicates
+    for (const catId of order) {
+      if (!mongoose.Types.ObjectId.isValid(catId)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid category ID: ${catId}`,
+        });
+      }
+    }
+
+    const orgFilter = isSuperAdmin ? {} : { organization: req.user.organization };
+
+    // Strict contract: verify every ID in order exists within the authorized scope
+    if (order.length > 0) {
+      const matchingCount = await Category.countDocuments({
+        _id: { $in: order },
+        ...orgFilter,
+      });
+
+      if (matchingCount !== order.length) {
+        return res.status(400).json({
+          success: false,
+          message: "One or more category IDs are invalid or belong to another organization",
+        });
+      }
+    }
+
     const bulkOps = order.map((categoryId, index) => ({
       updateOne: {
-        filter: { _id: categoryId },
+        filter: { _id: categoryId, ...orgFilter },
         update: { $set: { displayOrder: index } },
       },
     }));
 
-    await Category.bulkWrite(bulkOps);
+    if (bulkOps.length > 0) {
+      await Category.bulkWrite(bulkOps);
+    }
 
-    const categories = await Category.find({ isActive: true })
+    const findFilter = { isActive: true, ...orgFilter };
+    const categories = await Category.find(findFilter)
       .sort({ displayOrder: 1 })
       .select("name slug displayOrder");
 
@@ -910,7 +1069,22 @@ const updateKeywords = async (req, res) => {
       });
     }
 
-    const category = await Category.findById(id);
+    let category;
+    if (req.user.role === "super_admin") {
+      category = await Category.findById(id);
+    } else {
+      if (!req.user.organization) {
+        return res.status(403).json({
+          success: false,
+          message: "Organization context required",
+        });
+      }
+      category = await Category.findOne({
+        _id: id,
+        organization: req.user.organization,
+      });
+    }
+
     if (!category) {
       return res.status(404).json({
         success: false,
@@ -983,7 +1157,15 @@ const seedCategories = async (req, res) => {
  */
 const getAllCategoryStats = async (req, res) => {
   try {
-    const stats = await Category.getAllStatistics();
+    let orgScope;
+    if (req.user.role === "super_admin") {
+      orgScope = req.query.organization || null;
+    } else {
+      orgScope = req.user.organization;
+    }
+
+    const matchFilter = orgScope ? { organization: orgScope } : {};
+    const stats = await Category.getAllStatistics(matchFilter);
 
     res.status(200).json({
       success: true,
@@ -1015,7 +1197,22 @@ const assignStaffToCategory = async (req, res) => {
       });
     }
 
-    const category = await Category.findById(id);
+    let category;
+    if (req.user.role === "super_admin") {
+      category = await Category.findById(id);
+    } else {
+      if (!req.user.organization) {
+        return res.status(403).json({
+          success: false,
+          message: "Organization context required",
+        });
+      }
+      category = await Category.findOne({
+        _id: id,
+        organization: req.user.organization,
+      });
+    }
+
     if (!category) {
       return res.status(404).json({
         success: false,
@@ -1023,13 +1220,21 @@ const assignStaffToCategory = async (req, res) => {
       });
     }
 
-    // Validate staff exist
+    // Validate staff exist and belong to the category's organization
     const User = mongoose.model("User");
     const validStaff = await User.find({
       _id: { $in: staffIds },
       role: "staff",
+      organization: category.organization,
       isActive: true,
     }).select("_id");
+
+    if (validStaff.length !== staffIds.length) {
+      return res.status(400).json({
+        success: false,
+        message: "One or more staff members are invalid or do not belong to this organization",
+      });
+    }
 
     const validStaffIds = validStaff.map((s) => s._id);
 

@@ -8,6 +8,9 @@ const adminService = {
   assignStaff: (id, staffId) =>
     api.post(`/admin/complaints/${id}/assign`, { staffId }),
 
+  assignStaffWithRules: (id, data) =>
+    api.post(`/admin/complaints/${id}/assign-with-rules`, data),
+
   reassignStaff: (id, staffId, reason) =>
     api.put(`/admin/complaints/${id}/reassign`, { staffId, reason }),
 

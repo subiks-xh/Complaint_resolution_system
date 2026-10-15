@@ -538,8 +538,9 @@ categorySchema.statics.suggestCategory = async function (text) {
 };
 
 // Get category statistics summary
-categorySchema.statics.getAllStatistics = async function () {
-  const categories = await this.find({ isActive: true });
+categorySchema.statics.getAllStatistics = async function (match = {}) {
+  const query = { isActive: true, ...match };
+  const categories = await this.find(query);
 
   return Promise.all(
     categories.map(async (cat) => ({

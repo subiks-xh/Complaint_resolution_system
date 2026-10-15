@@ -22,6 +22,7 @@ const {
   markNotificationRead,
   markAllNotificationsRead,
   deleteNotification,
+  getNotificationPreferences,
   updateNotificationPreferences,
   getUserById,
   getAllUsers,
@@ -145,6 +146,13 @@ router.delete(
   commonValidation.objectIdParam("id"),
   deleteNotification,
 );
+
+/**
+ * @route   GET /api/users/notification-preferences
+ * @desc    Get notification preferences
+ * @access  Private
+ */
+router.get("/notification-preferences", protect, getNotificationPreferences);
 
 /**
  * @route   PUT /api/users/notification-preferences
